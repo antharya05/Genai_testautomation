@@ -6,7 +6,7 @@ import RequirementsPanel from "./components/RequirementsPanel";
 import TestCaseTable from "./components/TestCaseTable";
 import GeneratingScreen from "./components/GeneratingScreen";
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API = import.meta.env.VITE_API_URL || "https://genai-testautomation.onrender.com";
 
 export default function App() {
   const [phase, setPhase] = useState("upload");
