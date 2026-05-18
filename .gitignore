@@ -1,0 +1,36 @@
+# Environment variables (keep secrets out of git)
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Uploaded files
+backend/uploads/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+uvicorn.log
+vite.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude internal
+.claude/
