@@ -17,7 +17,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { getProjectRuns, getRunRequirements, getRunTestCases } from "../../api/client";
 import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
-import type { Run, TestCase } from "../../types";
+import type { ASIL, Run, TestCase } from "../../types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ function analyzeRequirement(
 
   // Infer ASIL from related test cases
   const asilValues = relatedCases.map(tc => tc.asil);
-  const asilPriority = ["D", "C", "B", "A", "QM"];
+  const asilPriority: ASIL[] = ["D", "C", "B", "A", "QM"];
   const topAsil = asilPriority.find(a => asilValues.includes(a)) ?? "QM";
 
   // Risk classification
