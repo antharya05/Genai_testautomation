@@ -1,12 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, ChevronDown, LogOut, Moon, Sun, User } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Menu, Moon, Sun, User } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getProject, getProjectStats } from '../../api/client';
+import { getActiveProvider } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { useProject } from '../../context/ProjectContext';
 import { useTheme } from '../../hooks/useTheme';
-
-const DEFAULT_PROJECT_ID = '00000000-0000-0000-0000-000000000001';
+import { formatModelName } from '../../utils/format';
+import type { ActiveProvider } from '../../types';
 
 function formatRelative(iso: string | undefined): string {
   if (!iso) return '';
@@ -25,33 +26,30 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-interface Props { sidebarWidth: number; }
+interface Props {
+  sidebarWidth: number;
+  isMobile?: boolean;
+  onMobileMenuOpen?: () => void;
+}
 
-export function AppTopBar({ sidebarWidth }: Props) {
+export function AppTopBar({ sidebarWidth, isMobile, onMobileMenuOpen }: Props) {
   const { isDark, toggle } = useTheme();
   const { user, signOut } = useAuth();
+  const { projects, selectedProject, setSelectedProject } = useProject();
   const navigate = useNavigate();
 
-  const [totalRuns, setTotalRuns] = useState<number | null>(null);
-  const [lastRunAt, setLastRunAt] = useState<string | undefined>(undefined);
+  const [activeProvider, setActiveProvider] = useState<ActiveProvider | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      getProjectStats(DEFAULT_PROJECT_ID),
-      getProject(DEFAULT_PROJECT_ID),
-    ]).then(([stats, project]) => {
-      if (!cancelled) {
-        setTotalRuns(stats.total_runs);
-        setLastRunAt(project.last_run_at);
-      }
-    }).catch(() => {});
+    getActiveProvider().then(p => { if (!cancelled) setActiveProvider(p); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
-  // Close menu on outside click
   useEffect(() => {
     if (!showUserMenu) return;
     function handleClick(e: MouseEvent) {
@@ -63,13 +61,24 @@ export function AppTopBar({ sidebarWidth }: Props) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showUserMenu]);
 
+  useEffect(() => {
+    if (!showProjectMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) {
+        setShowProjectMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showProjectMenu]);
+
   function handleSignOut() {
     setShowUserMenu(false);
     signOut();
     navigate('/signin', { replace: true });
   }
 
-  const relative = formatRelative(lastRunAt);
+  const relative = formatRelative(selectedProject?.last_run_at ?? undefined);
   const userInitials = user ? initials(user.name) : 'U';
 
   return (
@@ -79,39 +88,124 @@ export function AppTopBar({ sidebarWidth }: Props) {
       style={{
         position: 'fixed', top: 0, right: 0, left: sidebarWidth, height: 56,
         background: 'var(--c-bg)', borderBottom: '1px solid var(--c-border)',
-        display: 'flex', alignItems: 'center', padding: '0 24px',
-        gap: 12, zIndex: 30,
+        display: 'flex', alignItems: 'center', padding: '0 16px',
+        gap: 10, zIndex: 30,
       }}
     >
-      {/* Project context */}
-      <button
-        style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          padding: '5px 12px', borderRadius: 8,
-          background: 'var(--c-surface)', border: '1px solid var(--c-border)',
-          color: 'var(--c-text)', fontSize: '0.8125rem', fontWeight: 500,
-          cursor: 'pointer', fontFamily: 'var(--font)',
-          transition: 'border-color 0.15s ease',
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border-2)'; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
-      >
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', display: 'inline-block', flexShrink: 0 }} />
-        <span>Default Project</span>
-        {totalRuns !== null && (
-          <span style={{ fontSize: '0.6875rem', color: 'var(--c-text-3)', fontWeight: 400 }}>
-            &nbsp;·&nbsp;{totalRuns} run{totalRuns !== 1 ? 's' : ''}
+      {/* Hamburger (mobile only) */}
+      {isMobile && (
+        <button
+          onClick={onMobileMenuOpen}
+          title="Open navigation"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+            background: 'var(--c-surface)', border: '1px solid var(--c-border)',
+            cursor: 'pointer', color: 'var(--c-text-2)',
+          }}
+        >
+          <Menu size={17} />
+        </button>
+      )}
+
+      {/* Project context dropdown */}
+      <div ref={projectMenuRef} style={{ position: 'relative' }}>
+        <button
+          onClick={() => projects.length > 1 && setShowProjectMenu(v => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '5px 12px', borderRadius: 8,
+            background: 'var(--c-surface)', border: '1px solid var(--c-border)',
+            color: 'var(--c-text)', fontSize: '0.8125rem', fontWeight: 500,
+            cursor: projects.length > 1 ? 'pointer' : 'default', fontFamily: 'var(--font)',
+            transition: 'border-color 0.15s ease',
+            maxWidth: isMobile ? 'calc(100vw - 180px)' : undefined,
+            overflow: 'hidden',
+          }}
+          onMouseEnter={e => { if (projects.length > 1) (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border-2)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
+        >
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', display: 'inline-block', flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {selectedProject?.name ?? 'No Project'}
           </span>
-        )}
-        {relative && (
-          <span style={{ fontSize: '0.6875rem', color: 'var(--c-text-3)', fontWeight: 400 }}>
-            &nbsp;·&nbsp;{relative}
-          </span>
-        )}
-        <ChevronDown size={13} style={{ color: 'var(--c-text-3)', marginLeft: 2 }} />
-      </button>
+          {!isMobile && relative && (
+            <span style={{ fontSize: '0.6875rem', color: 'var(--c-text-3)', fontWeight: 400, flexShrink: 0 }}>
+              &nbsp;·&nbsp;{relative}
+            </span>
+          )}
+          {projects.length > 1 && (
+            <ChevronDown size={13} style={{ color: 'var(--c-text-3)', marginLeft: 2, flexShrink: 0 }} />
+          )}
+        </button>
+
+        <AnimatePresence>
+          {showProjectMenu && (
+            <motion.div
+              initial={{ opacity: 0, y: -4, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.98 }}
+              transition={{ duration: 0.14 }}
+              style={{
+                position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+                background: 'var(--c-surface)', border: '1px solid var(--c-border)',
+                borderRadius: 10, zIndex: 200, minWidth: 220,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.2)', maxHeight: 320, overflowY: 'auto',
+              }}
+            >
+              <div style={{ padding: '6px 12px 4px', fontSize: '0.6875rem', fontWeight: 700, color: 'var(--c-text-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Switch Project
+              </div>
+              {projects.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { setSelectedProject(p); setShowProjectMenu(false); }}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 12px', border: 'none', borderBottom: '1px solid var(--c-border)',
+                    background: p.id === selectedProject?.id ? 'var(--c-accent-dim)' : 'transparent',
+                    color: p.id === selectedProject?.id ? 'var(--c-accent)' : 'var(--c-text-2)',
+                    cursor: 'pointer', fontFamily: 'var(--font)', textAlign: 'left',
+                    fontSize: '0.8125rem', fontWeight: 500, transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => { if (p.id !== selectedProject?.id) (e.currentTarget as HTMLElement).style.background = 'var(--c-bg-2)'; }}
+                  onMouseLeave={e => { if (p.id !== selectedProject?.id) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: p.id === selectedProject?.id ? 'var(--c-accent)' : 'var(--c-text-3)' }} />
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.name}
+                  </span>
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       <div style={{ flex: 1 }} />
+
+      {/* Active model indicator */}
+      {activeProvider?.model && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px', borderRadius: 6,
+          background: activeProvider.has_key ? 'rgba(16,185,129,0.06)' : 'var(--c-surface)',
+          border: `1px solid ${activeProvider.has_key ? 'rgba(16,185,129,0.2)' : 'var(--c-border)'}`,
+          flexShrink: 0,
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+            background: activeProvider.has_key ? '#10b981' : 'var(--c-text-3)',
+          }} />
+          <span style={{
+            fontSize: '0.75rem', fontWeight: 500,
+            color: activeProvider.has_key ? '#10b981' : 'var(--c-text-3)',
+            whiteSpace: 'nowrap',
+          }}>
+            {formatModelName(activeProvider.model)}
+          </span>
+        </div>
+      )}
 
       {/* Notifications */}
       <button className="btn-icon" title="Notifications" style={{ position: 'relative' }}>
@@ -177,10 +271,7 @@ export function AppTopBar({ sidebarWidth }: Props) {
               }}
             >
               {/* User info */}
-              <div style={{
-                padding: '14px 16px 12px',
-                borderBottom: '1px solid var(--c-border)',
-              }}>
+              <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid var(--c-border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{
                     width: 34, height: 34, borderRadius: '50%', flexShrink: 0,

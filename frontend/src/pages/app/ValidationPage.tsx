@@ -1,20 +1,25 @@
 import { motion } from "framer-motion";
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   FileText,
   GitBranch,
+  Info,
   Loader2,
   Shield,
   Sparkles,
+  TrendingUp,
+  XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getProjectRuns, getRunRequirements, getRunTestCases } from "../../api/client";
+import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
 import type { Run, TestCase } from "../../types";
 
-const DEFAULT_PROJECT_ID = "00000000-0000-0000-0000-000000000001";
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const ASIL_ORDER = ["D", "C", "B", "A", "QM"];
 const ASIL_COLORS: Record<string, string> = {
@@ -24,6 +29,75 @@ const ASIL_BG: Record<string, string> = {
   QM: "rgba(148,163,184,0.1)", A: "rgba(16,185,129,0.1)",
   B: "rgba(245,158,11,0.1)", C: "rgba(249,115,22,0.1)", D: "rgba(239,68,68,0.1)",
 };
+const TYPE_COLORS: Record<string, string> = {
+  functional: "#818cf8", boundary: "#34d399", negative: "#f87171",
+  fault_injection: "#fb923c", timing: "#60a5fa", safety: "#a78bfa",
+  recovery: "#4ade80", stress: "#f472b6",
+};
+
+// ─── Requirement analysis helpers ─────────────────────────────────────────────
+
+const AMBIGUOUS_WORDS = [
+  "quickly", "fast", "efficiently", "properly", "adequate", "reasonable",
+  "timely", "soon", "immediately", "shortly", "optimal", "appropriate",
+  "sufficient", "reasonable", "satisfactory", "good", "acceptable",
+];
+
+const TIMING_UNITS = ["ms", "millisecond", "second", "hz", "μs", "us", "cycle", "period", "latency", "timeout"];
+const NUMERIC = /\d+(\.\d+)?\s*(ms|s|hz|rpm|v|°c|%|a|w|bar|km\/h|m\/s)/i;
+const THRESHOLD = /\d+(\.\d+)?\s*(ms|milliseconds?|seconds?|hz|rpm|volts?|°c|celsius|%|amps?|watts?|bar|km\/h)/i;
+
+type ReqFlag = "valid" | "ambiguous" | "missing_timing" | "missing_threshold" | "incomplete";
+
+interface ReqAnalysis {
+  id: string;
+  text: string;
+  flags: ReqFlag[];
+  risk: "high" | "medium" | "low";
+  asil: string;
+  covered: boolean;
+}
+
+function analyzeRequirement(
+  id: string,
+  text: string,
+  covered: boolean,
+  relatedCases: TestCase[],
+): ReqAnalysis {
+  const flags: ReqFlag[] = [];
+  const lower = text.toLowerCase();
+
+  if (text.length < 25) flags.push("incomplete");
+
+  const hasAmbiguous = AMBIGUOUS_WORDS.some(w => lower.includes(w));
+  if (hasAmbiguous) flags.push("ambiguous");
+
+  const mightNeedTiming = ["respond", "detect", "trigger", "activat", "deactivat", "process", "communicat", "transmit", "receive"].some(k => lower.includes(k));
+  if (mightNeedTiming && !TIMING_UNITS.some(u => lower.includes(u))) flags.push("missing_timing");
+
+  const mightNeedThreshold = ["voltage", "temperature", "speed", "current", "pressure", "signal", "level", "range", "limit", "threshold"].some(k => lower.includes(k));
+  if (mightNeedThreshold && !THRESHOLD.test(text)) flags.push("missing_threshold");
+
+  if (flags.length === 0) flags.push("valid");
+
+  // Infer ASIL from related test cases
+  const asilValues = relatedCases.map(tc => tc.asil);
+  const asilPriority = ["D", "C", "B", "A", "QM"];
+  const topAsil = asilPriority.find(a => asilValues.includes(a)) ?? "QM";
+
+  // Risk classification
+  let risk: "high" | "medium" | "low" = "low";
+  if (topAsil === "D" || topAsil === "C") risk = "high";
+  else if (topAsil === "B" || topAsil === "A") risk = "medium";
+  if (!covered) risk = topAsil === "QM" ? "medium" : "high";
+  if (flags.includes("missing_timing") || flags.includes("missing_threshold")) {
+    if (risk === "low") risk = "medium";
+  }
+
+  return { id, text, flags, risk, asil: topAsil, covered };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
   try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
@@ -40,11 +114,9 @@ function formatRelative(iso: string): string {
   } catch { return "—"; }
 }
 
-// ─── KPI card ─────────────────────────────────────────────────────────────────
+// ─── Small components ─────────────────────────────────────────────────────────
 
-function KpiCard({
-  label, value, sub, color, icon: Icon,
-}: {
+function KpiCard({ label, value, sub, color, icon: Icon }: {
   label: string; value: string | number; sub?: string;
   color: string; icon: React.ComponentType<{ size?: number; strokeWidth?: number; color?: string }>;
 }) {
@@ -54,61 +126,191 @@ function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       style={{
         background: "var(--c-surface)", border: "1px solid var(--c-border)",
-        borderRadius: 13, padding: "18px 20px",
-        display: "flex", alignItems: "center", gap: 14,
+        borderRadius: 13, padding: "16px 18px",
+        display: "flex", alignItems: "center", gap: 12,
       }}
     >
       <div style={{
-        width: 38, height: 38, borderRadius: 9, flexShrink: 0,
+        width: 36, height: 36, borderRadius: 9, flexShrink: 0,
         background: color + "18", border: `1px solid ${color}30`,
         display: "flex", alignItems: "center", justifyContent: "center",
       }}>
-        <Icon size={17} color={color} strokeWidth={1.75} />
+        <Icon size={16} color={color} strokeWidth={1.75} />
       </div>
       <div>
-        <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--c-text)", lineHeight: 1, letterSpacing: "-0.03em" }}>
+        <div style={{ fontSize: "1.375rem", fontWeight: 800, color: "var(--c-text)", lineHeight: 1, letterSpacing: "-0.03em" }}>
           {typeof value === "number" ? value.toLocaleString() : value}
         </div>
-        <div style={{ fontSize: "0.75rem", color: "var(--c-text-3)", marginTop: 3 }}>{label}</div>
-        {sub && <div style={{ fontSize: "0.6875rem", color: color, marginTop: 2, fontWeight: 600 }}>{sub}</div>}
+        <div style={{ fontSize: "0.72rem", color: "var(--c-text-3)", marginTop: 3 }}>{label}</div>
+        {sub && <div style={{ fontSize: "0.6875rem", color, marginTop: 2, fontWeight: 600 }}>{sub}</div>}
       </div>
     </motion.div>
   );
 }
 
-// ─── Check row ─────────────────────────────────────────────────────────────────
-
-function CheckRow({ pass, label }: { pass: boolean; label: string }) {
+function SectionHeader({ title, sub, color }: { title: string; sub?: string; color?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--c-border)" }}>
-      <div style={{
-        width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-        background: pass ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.1)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        {pass
-          ? <CheckCircle2 size={13} color="#10b981" strokeWidth={2} />
-          : <AlertCircle size={13} color="#f87171" strokeWidth={2} />
-        }
-      </div>
-      <span style={{ fontSize: "0.875rem", color: pass ? "var(--c-text)" : "var(--c-text-2)", fontWeight: pass ? 500 : 400 }}>
-        {label}
-      </span>
-      <span style={{
-        marginLeft: "auto", fontSize: "0.6875rem", fontWeight: 700, padding: "2px 7px", borderRadius: 5,
-        background: pass ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.08)",
-        border: `1px solid ${pass ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.18)"}`,
-        color: pass ? "#10b981" : "#f87171",
-      }}>
-        {pass ? "PASS" : "FAIL"}
-      </span>
+    <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--c-border)" }}>
+      <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)" }}>{title}</span>
+      {sub && <span style={{ marginLeft: 8, fontSize: "0.75rem", color: color ?? "var(--c-text-3)" }}>{sub}</span>}
     </div>
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+function BarRow({ label, count, max, color }: { label: string; count: number; max: number; color: string }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: "0.8125rem", color: "var(--c-text-2)", fontWeight: 500, textTransform: "capitalize" }}>
+          {label.replace(/_/g, " ")}
+        </span>
+        <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)", fontFamily: "var(--font-mono)" }}>{count}</span>
+      </div>
+      <div style={{ height: 5, background: "var(--c-border)", borderRadius: 3, overflow: "hidden" }}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${(count / Math.max(1, max)) * 100}%` }}
+          transition={{ duration: 0.5 }}
+          style={{ height: "100%", borderRadius: 3, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Flag descriptions shown in requirement rows
+const FLAG_CONFIG: Record<ReqFlag, { label: string; color: string; icon: React.ComponentType<{ size?: number; color?: string }> }> = {
+  valid:             { label: "Valid",                  color: "#10b981", icon: CheckCircle2 },
+  ambiguous:         { label: "Ambiguous language",    color: "#f59e0b", icon: AlertTriangle },
+  missing_timing:    { label: "Missing timing constraint", color: "#f97316", icon: AlertCircle },
+  missing_threshold: { label: "Missing threshold",     color: "#f97316", icon: AlertCircle },
+  incomplete:        { label: "Incomplete requirement", color: "#f87171", icon: XCircle },
+};
+
+function ReqRow({ req, index }: { req: ReqAnalysis; index: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasIssues = req.flags.some(f => f !== "valid");
+  const riskColor = req.risk === "high" ? "#ef4444" : req.risk === "medium" ? "#f59e0b" : "#10b981";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.02 }}
+      style={{
+        borderBottom: "1px solid var(--c-border)",
+        background: hasIssues ? "transparent" : "transparent",
+      }}
+    >
+      <div
+        onClick={() => setExpanded(v => !v)}
+        style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "10px 16px", cursor: "pointer",
+          transition: "background 0.1s",
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "var(--c-bg-2)"; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+      >
+        {/* Coverage indicator */}
+        <div style={{ flexShrink: 0 }}>
+          {req.covered
+            ? <CheckCircle2 size={14} color="#10b981" />
+            : <XCircle size={14} color="#f87171" />
+          }
+        </div>
+
+        {/* Requirement ID */}
+        <span style={{
+          fontSize: "0.7rem", fontFamily: "var(--font-mono)", fontWeight: 600,
+          color: "var(--c-accent)", flexShrink: 0, minWidth: 60,
+        }}>
+          {req.id || "REQ-?"}
+        </span>
+
+        {/* ASIL badge */}
+        <span style={{
+          fontSize: "0.6rem", fontWeight: 700, padding: "1px 5px", borderRadius: 4,
+          background: ASIL_BG[req.asil] ?? ASIL_BG.QM,
+          color: ASIL_COLORS[req.asil] ?? ASIL_COLORS.QM,
+          border: `1px solid ${ASIL_COLORS[req.asil] ?? ASIL_COLORS.QM}30`,
+          letterSpacing: "0.03em", flexShrink: 0,
+        }}>
+          {req.asil === "QM" ? "QM" : `ASIL-${req.asil}`}
+        </span>
+
+        {/* Requirement text */}
+        <span style={{
+          flex: 1, fontSize: "0.8125rem", color: "var(--c-text-2)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: expanded ? "normal" : "nowrap",
+        }}>
+          {req.text}
+        </span>
+
+        {/* Flags */}
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {req.flags.filter(f => f !== "valid").map(f => {
+            const cfg = FLAG_CONFIG[f];
+            return (
+              <span key={f} style={{
+                fontSize: "0.6rem", fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                background: cfg.color + "12", border: `1px solid ${cfg.color}30`,
+                color: cfg.color, letterSpacing: "0.03em", whiteSpace: "nowrap",
+              }}>
+                {cfg.label}
+              </span>
+            );
+          })}
+        </div>
+
+        {/* Risk dot */}
+        <span style={{
+          width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+          background: riskColor, boxShadow: `0 0 5px ${riskColor}60`,
+        }} />
+      </div>
+
+      {/* Expanded flags */}
+      {expanded && req.flags.some(f => f !== "valid") && (
+        <div style={{ padding: "8px 48px 12px", background: "var(--c-bg-2)" }}>
+          {req.flags.filter(f => f !== "valid").map(f => {
+            const cfg = FLAG_CONFIG[f];
+            return (
+              <div key={f} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <cfg.icon size={13} color={cfg.color} />
+                <span style={{ fontSize: "0.8125rem", color: cfg.color, fontWeight: 500 }}>
+                  {flagDetail(f, req.text)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function flagDetail(flag: ReqFlag, text: string): string {
+  switch (flag) {
+    case "ambiguous": {
+      const found = AMBIGUOUS_WORDS.find(w => text.toLowerCase().includes(w));
+      return `Ambiguous term detected: "${found}" — replace with measurable criterion`;
+    }
+    case "missing_timing":
+      return "No timing constraint found — specify response time (e.g. < 50 ms, within 100 ms)";
+    case "missing_threshold":
+      return "No numeric threshold — add measurable value (e.g. voltage < 14V, temp > -40°C)";
+    case "incomplete":
+      return "Requirement is too short — provide full system behavior description";
+    default:
+      return "";
+  }
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ValidationPage() {
+  const { selectedProject } = useProject();
   const [searchParams] = useSearchParams();
   const urlRunId = searchParams.get("runId");
 
@@ -117,39 +319,41 @@ export default function ValidationPage() {
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
-  const [requirementCount, setRequirementCount] = useState(0);
-  const [requirementIds, setRequirementIds] = useState<string[]>([]);
+  const [requirements, setRequirements] = useState<{ id: string; text: string; position: number }[]>([]);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
-  // Load completed runs for run picker
   useEffect(() => {
-    getProjectRuns(DEFAULT_PROJECT_ID, 30)
-      .then(r => {
-        const completed = r.filter(run => run.status === "complete");
-        setRuns(completed);
-        if (!selectedRunId && completed.length > 0) {
-          setSelectedRunId(completed[0].id);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingRuns(false));
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // Load data for selected run
+  useEffect(() => {
+    if (!selectedProject) return;
+    async function load() {
+      try {
+        const r = await getProjectRuns(selectedProject!.id, 30);
+        const completed = r.filter(run => run.status === "complete");
+        setRuns(completed);
+        if (!selectedRunId && completed.length > 0) setSelectedRunId(completed[0].id);
+      } catch { /* ignore */ }
+      finally { setLoadingRuns(false); }
+    }
+    load();
+  }, [selectedProject]);
+
   useEffect(() => {
     if (!selectedRunId) return;
     setLoadingData(true);
     setTestCases([]);
-    setRequirementCount(0);
-    setRequirementIds([]);
-
+    setRequirements([]);
     Promise.all([
       getRunTestCases(selectedRunId),
       getRunRequirements(selectedRunId),
     ])
       .then(([tcs, reqs]) => {
         setTestCases(tcs);
-        setRequirementCount(reqs.length);
-        setRequirementIds(reqs.map(r => r.id));
+        setRequirements(reqs);
       })
       .catch(() => {})
       .finally(() => setLoadingData(false));
@@ -157,53 +361,58 @@ export default function ValidationPage() {
 
   const selectedRun = runs.find(r => r.id === selectedRunId) ?? null;
 
-  // ── Compute validation metrics ───────────────────────────────────────────────
+  // ─── Derived metrics ──────────────────────────────────────────────────────
 
-  const coveredReqIds = new Set(testCases.map(tc => tc.requirement_id));
-  const coveredCount = coveredReqIds.size;
-  const totalReqs = requirementCount || selectedRun?.requirement_count || 0;
-  const missingCount = Math.max(0, totalReqs - coveredCount);
-  const coveragePct = totalReqs > 0 ? Math.round((coveredCount / totalReqs) * 100) : 0;
+  const {
+    coveredCount, totalReqs, missingCount, coveragePct,
+    asilDist, typeDist, duplicateCount,
+    reqAnalyses, riskCounts, flagCounts,
+  } = useMemo(() => {
+    const coveredReqIds = new Set(testCases.map(tc => tc.requirement_id));
+    const totalReqs = requirements.length || selectedRun?.requirement_count || 0;
+    const coveredCount = coveredReqIds.size;
+    const missingCount = Math.max(0, totalReqs - coveredCount);
+    const coveragePct = totalReqs > 0 ? Math.round((coveredCount / totalReqs) * 100) : 0;
 
-  // Duplicate detection: same requirement_id + same test_type
-  const seenKeys = new Set<string>();
-  let duplicateCount = 0;
-  for (const tc of testCases) {
-    const key = `${tc.requirement_id}::${tc.test_type}`;
-    if (seenKeys.has(key)) duplicateCount++;
-    else seenKeys.add(key);
-  }
+    const asilDist: Record<string, number> = {};
+    const typeDist: Record<string, number> = {};
+    const seenKeys = new Set<string>();
+    let duplicateCount = 0;
+    for (const tc of testCases) {
+      asilDist[tc.asil] = (asilDist[tc.asil] ?? 0) + 1;
+      typeDist[tc.test_type] = (typeDist[tc.test_type] ?? 0) + 1;
+      const key = `${tc.requirement_id}::${tc.test_type}`;
+      if (seenKeys.has(key)) duplicateCount++;
+      else seenKeys.add(key);
+    }
 
-  // ASIL distribution
-  const asilDist: Record<string, number> = {};
-  for (const tc of testCases) {
-    asilDist[tc.asil] = (asilDist[tc.asil] ?? 0) + 1;
-  }
+    // Requirement analyses
+    const reqAnalyses: ReqAnalysis[] = requirements.map(req => {
+      const related = testCases.filter(tc => tc.requirement_id === req.id);
+      return analyzeRequirement(req.id, req.text, coveredReqIds.has(req.id), related);
+    });
+
+    const riskCounts = { high: 0, medium: 0, low: 0 };
+    const flagCounts: Record<ReqFlag, number> = { valid: 0, ambiguous: 0, missing_timing: 0, missing_threshold: 0, incomplete: 0 };
+    for (const ra of reqAnalyses) {
+      riskCounts[ra.risk]++;
+      for (const f of ra.flags) flagCounts[f]++;
+    }
+
+    return { coveredCount, totalReqs, missingCount, coveragePct, asilDist, typeDist, duplicateCount, reqAnalyses, riskCounts, flagCounts };
+  }, [testCases, requirements, selectedRun]);
+
   const maxAsilCount = Math.max(1, ...Object.values(asilDist));
-
-  // Test type distribution
-  const typeDist: Record<string, number> = {};
-  for (const tc of testCases) {
-    typeDist[tc.test_type] = (typeDist[tc.test_type] ?? 0) + 1;
-  }
   const maxTypeCount = Math.max(1, ...Object.values(typeDist));
-
-  const TYPE_COLORS: Record<string, string> = {
-    functional: "#818cf8", boundary: "#34d399", negative: "#f87171",
-    fault_injection: "#fb923c", timing: "#60a5fa", safety: "#a78bfa",
-    recovery: "#4ade80", stress: "#f472b6",
-  };
-
-  const allCovered = missingCount === 0 && totalReqs > 0;
-  const noDuplicates = duplicateCount === 0;
   const hasData = testCases.length > 0;
+  const issueCount = flagCounts.ambiguous + flagCounts.missing_timing + flagCounts.missing_threshold + flagCounts.incomplete;
 
   return (
     <PageTransition>
-      <div style={{ padding: "28px 32px 48px", maxWidth: 1100 }}>
+      <div style={{ padding: "28px 32px 64px", maxWidth: 1100 }}>
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               width: 34, height: 34, borderRadius: 9,
@@ -214,15 +423,14 @@ export default function ValidationPage() {
             </div>
             <div>
               <h1 style={{ fontSize: "1.375rem", fontWeight: 700, color: "var(--c-text)", letterSpacing: "-0.02em", margin: 0 }}>
-                Validation
+                Validation Center
               </h1>
               <p style={{ color: "var(--c-text-3)", fontSize: "0.8125rem", margin: 0 }}>
-                Coverage and quality analysis for generated test assets
+                Requirement quality, coverage analysis, and risk classification
               </p>
             </div>
           </div>
 
-          {/* Run selector */}
           {runs.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: "0.8125rem", color: "var(--c-text-3)" }}>Run:</span>
@@ -245,14 +453,13 @@ export default function ValidationPage() {
           )}
         </div>
 
-        {/* Loading */}
+        {/* Loading / empty states */}
         {loadingRuns && (
           <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}>
             <Loader2 size={20} color="var(--c-accent)" style={{ animation: "spin 1s linear infinite" }} />
           </div>
         )}
 
-        {/* No runs */}
         {!loadingRuns && runs.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -267,24 +474,15 @@ export default function ValidationPage() {
             </div>
             <h3 style={{ fontSize: "1rem", fontWeight: 600, color: "var(--c-text)", margin: "0 0 8px" }}>No completed runs yet</h3>
             <p style={{ fontSize: "0.875rem", color: "var(--c-text-3)", margin: "0 0 22px", lineHeight: 1.6 }}>
-              Run a generation to see validation metrics here.
+              Generate test cases to enable validation analysis.
             </p>
-            <Link
-              to="/app/generate"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "8px 18px", borderRadius: 8,
-                background: "var(--c-accent)", color: "white", textDecoration: "none",
-                fontSize: "0.875rem", fontWeight: 600,
-              }}
-            >
+            <Link to="/app/generate" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 8, background: "var(--c-accent)", color: "white", textDecoration: "none", fontSize: "0.875rem", fontWeight: 600 }}>
               <Sparkles size={14} />
               Generate Test Cases
             </Link>
           </motion.div>
         )}
 
-        {/* Data loaded */}
         {!loadingRuns && selectedRun && (
           <>
             {/* Run context strip */}
@@ -295,7 +493,7 @@ export default function ValidationPage() {
             }}>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", flexShrink: 0, display: "inline-block" }} />
               <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)" }}>
-                {selectedRun.test_case_count} test cases from {selectedRun.requirement_count} requirements
+                {selectedRun.test_case_count} test cases · {selectedRun.requirement_count} requirements
               </span>
               <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)" }}>
                 {formatRelative(selectedRun.created_at)} · {formatDate(selectedRun.created_at)}
@@ -313,202 +511,251 @@ export default function ValidationPage() {
                 <Loader2 size={18} color="var(--c-accent)" style={{ animation: "spin 1s linear infinite" }} />
               </div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 14, alignItems: "start" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-                {/* Left column */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-                  {/* KPI strip */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                    <KpiCard
-                      label="Requirements Covered"
-                      value={`${coveredCount} / ${totalReqs}`}
-                      sub={totalReqs > 0 ? `${coveragePct}% coverage` : undefined}
-                      color="#10b981"
-                      icon={GitBranch}
-                    />
-                    <KpiCard
-                      label="Generated Test Cases"
-                      value={testCases.length}
-                      sub={totalReqs > 0 ? `~${(testCases.length / Math.max(1, totalReqs)).toFixed(1)} per requirement` : undefined}
-                      color="#818cf8"
-                      icon={Sparkles}
-                    />
-                    <KpiCard
-                      label="Missing Requirements"
-                      value={missingCount}
-                      sub={missingCount > 0 ? "requirements without test cases" : "all requirements covered"}
-                      color={missingCount > 0 ? "#f87171" : "#10b981"}
-                      icon={FileText}
-                    />
-                    <KpiCard
-                      label="Duplicate Test Cases"
-                      value={duplicateCount}
-                      sub={duplicateCount > 0 ? "same req + test type pairs" : "no duplicates detected"}
-                      color={duplicateCount > 0 ? "#f59e0b" : "#10b981"}
-                      icon={Shield}
-                    />
-                  </div>
-
-                  {/* Validation Status */}
-                  <div style={{
-                    background: "var(--c-surface)", border: "1px solid var(--c-border)",
-                    borderRadius: 14, overflow: "hidden",
-                  }}>
-                    <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--c-border)" }}>
-                      <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)" }}>Validation Status</span>
-                    </div>
-                    <div style={{ padding: "4px 20px 8px" }}>
-                      <CheckRow
-                        pass={allCovered && hasData}
-                        label={allCovered && hasData
-                          ? `All ${totalReqs} requirements are mapped to test cases`
-                          : missingCount > 0
-                            ? `${missingCount} requirement${missingCount !== 1 ? "s" : ""} have no test cases`
-                            : "No run data loaded"
-                        }
-                      />
-                      <CheckRow
-                        pass={noDuplicates && hasData}
-                        label={noDuplicates && hasData
-                          ? "No duplicate test cases detected"
-                          : `${duplicateCount} duplicate requirement+type pair${duplicateCount !== 1 ? "s" : ""} detected`
-                        }
-                      />
-                      <CheckRow
-                        pass={coveragePct === 100 && hasData}
-                        label={`Coverage: ${coveragePct}%${coveragePct === 100 && hasData ? " — complete" : coveragePct > 0 ? ` — ${100 - coveragePct}% gap remaining` : ""}`}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Test Type Distribution */}
-                  {Object.keys(typeDist).length > 0 && (
-                    <div style={{
-                      background: "var(--c-surface)", border: "1px solid var(--c-border)",
-                      borderRadius: 14, padding: "16px 20px",
-                    }}>
-                      <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 14 }}>
-                        Test Type Distribution
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {Object.entries(typeDist)
-                          .sort((a, b) => b[1] - a[1])
-                          .map(([type, count]) => (
-                            <div key={type}>
-                              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                                <span style={{ fontSize: "0.8125rem", color: "var(--c-text-2)", fontWeight: 500, textTransform: "capitalize" }}>
-                                  {type.replace(/_/g, " ")}
-                                </span>
-                                <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)", fontFamily: "var(--font-mono)" }}>{count}</span>
-                              </div>
-                              <div style={{ height: 5, background: "var(--c-border)", borderRadius: 3, overflow: "hidden" }}>
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${(count / maxTypeCount) * 100}%` }}
-                                  transition={{ duration: 0.5 }}
-                                  style={{ height: "100%", borderRadius: 3, background: TYPE_COLORS[type] ?? "#818cf8" }}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  )}
+                {/* ── 1. KPI STRIP ──────────────────────────────────────── */}
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 10 }}>
+                  <KpiCard
+                    label="Requirements Covered"
+                    value={`${coveredCount}/${totalReqs}`}
+                    sub={`${coveragePct}% coverage`}
+                    color="#10b981"
+                    icon={GitBranch}
+                  />
+                  <KpiCard
+                    label="Requirement Issues"
+                    value={issueCount}
+                    sub={issueCount === 0 ? "all requirements valid" : `${issueCount} need attention`}
+                    color={issueCount > 0 ? "#f59e0b" : "#10b981"}
+                    icon={AlertCircle}
+                  />
+                  <KpiCard
+                    label="High Risk Items"
+                    value={riskCounts.high}
+                    sub={riskCounts.high === 0 ? "no high-risk requirements" : "require priority review"}
+                    color={riskCounts.high > 0 ? "#ef4444" : "#10b981"}
+                    icon={Shield}
+                  />
                 </div>
 
-                {/* Right column — ASIL Distribution */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div style={{
-                    background: "var(--c-surface)", border: "1px solid var(--c-border)",
-                    borderRadius: 14, padding: "16px 18px",
-                  }}>
-                    <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 14 }}>
-                      ASIL Distribution
-                    </div>
-                    {ASIL_ORDER.filter(a => asilDist[a] !== undefined).length === 0 ? (
-                      <p style={{ fontSize: "0.8125rem", color: "var(--c-text-3)", margin: 0 }}>No ASIL data available.</p>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {ASIL_ORDER.map(asil => {
-                          const count = asilDist[asil] ?? 0;
-                          if (count === 0) return null;
-                          const pct = Math.round((count / testCases.length) * 100);
-                          return (
-                            <div key={asil}>
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <div style={{
-                                    padding: "2px 8px", borderRadius: 5, fontSize: "0.7rem", fontWeight: 700,
-                                    background: ASIL_BG[asil], color: ASIL_COLORS[asil],
-                                    border: `1px solid ${ASIL_COLORS[asil]}30`, letterSpacing: "0.03em",
-                                  }}>
-                                    {asil === "QM" ? "QM" : `ASIL-${asil}`}
-                                  </div>
-                                  <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)" }}>{pct}%</span>
-                                </div>
-                                <span style={{ fontSize: "0.8125rem", color: "var(--c-text-2)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>{count}</span>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 10 }}>
+                  <KpiCard
+                    label="Generated Test Cases"
+                    value={testCases.length}
+                    sub={`~${(testCases.length / Math.max(1, totalReqs)).toFixed(1)} per requirement`}
+                    color="#818cf8"
+                    icon={Sparkles}
+                  />
+                  <KpiCard
+                    label="Uncovered Requirements"
+                    value={missingCount}
+                    sub={missingCount === 0 ? "full coverage" : "missing test cases"}
+                    color={missingCount > 0 ? "#f87171" : "#10b981"}
+                    icon={FileText}
+                  />
+                  <KpiCard
+                    label="Duplicate Cases"
+                    value={duplicateCount}
+                    sub={duplicateCount === 0 ? "no duplicates" : "same req + type pair"}
+                    color={duplicateCount > 0 ? "#f59e0b" : "#10b981"}
+                    icon={TrendingUp}
+                  />
+                </div>
+
+                {/* ── 2. RISK & COVERAGE side by side ───────────────────── */}
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14 }}>
+
+                  {/* Risk Analysis */}
+                  <div style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", borderRadius: 14, overflow: "hidden" }}>
+                    <SectionHeader title="Risk Analysis" sub="by ASIL level and constraint completeness" />
+                    <div style={{ padding: "16px 20px" }}>
+                      {[
+                        { label: "High Risk", value: riskCounts.high, color: "#ef4444", desc: "ASIL-C/D or uncovered safety requirements" },
+                        { label: "Medium Risk", value: riskCounts.medium, color: "#f59e0b", desc: "ASIL-A/B or requirements with gaps" },
+                        { label: "Low Risk", value: riskCounts.low, color: "#10b981", desc: "QM requirements fully covered and valid" },
+                      ].map(r => {
+                        const total = riskCounts.high + riskCounts.medium + riskCounts.low;
+                        const pct = total > 0 ? Math.round((r.value / total) * 100) : 0;
+                        return (
+                          <div key={r.label} style={{ marginBottom: 14 }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                                <span style={{
+                                  width: 8, height: 8, borderRadius: "50%", background: r.color,
+                                  display: "inline-block", boxShadow: `0 0 5px ${r.color}60`,
+                                }} />
+                                <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)" }}>{r.label}</span>
+                                <span style={{ fontSize: "0.72rem", color: "var(--c-text-3)" }}>{r.desc}</span>
                               </div>
-                              <div style={{ height: 5, background: "var(--c-border)", borderRadius: 3, overflow: "hidden" }}>
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${(count / maxAsilCount) * 100}%` }}
-                                  transition={{ duration: 0.5, delay: ASIL_ORDER.indexOf(asil) * 0.05 }}
-                                  style={{ height: "100%", borderRadius: 3, background: ASIL_COLORS[asil] }}
-                                />
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)" }}>{pct}%</span>
+                                <span style={{ fontSize: "0.9375rem", fontWeight: 700, color: r.color, minWidth: 24, textAlign: "right" }}>{r.value}</span>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                            <div style={{ height: 6, background: "var(--c-border)", borderRadius: 3, overflow: "hidden" }}>
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${pct}%` }}
+                                transition={{ duration: 0.6 }}
+                                style={{ height: "100%", borderRadius: 3, background: r.color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* Coverage circle */}
-                  {totalReqs > 0 && (
-                    <div style={{
-                      background: "var(--c-surface)", border: "1px solid var(--c-border)",
-                      borderRadius: 14, padding: "20px 18px", textAlign: "center",
-                    }}>
-                      <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 16 }}>
-                        Coverage Summary
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                        <svg width="110" height="110" viewBox="0 0 110 110">
-                          <circle cx="55" cy="55" r="46" fill="none" stroke="var(--c-border)" strokeWidth="8" />
+                  {/* Coverage Summary */}
+                  <div style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", borderRadius: 14, overflow: "hidden" }}>
+                    <SectionHeader title="Coverage Analysis" />
+                    <div style={{ padding: "16px 20px" }}>
+                      {/* Coverage donut */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 18 }}>
+                        <svg width="88" height="88" viewBox="0 0 88 88" style={{ flexShrink: 0 }}>
+                          <circle cx="44" cy="44" r="36" fill="none" stroke="var(--c-border)" strokeWidth="8" />
                           <circle
-                            cx="55" cy="55" r="46" fill="none"
+                            cx="44" cy="44" r="36" fill="none"
                             stroke={coveragePct === 100 ? "#10b981" : coveragePct >= 80 ? "#f59e0b" : "#f87171"}
-                            strokeWidth="8"
-                            strokeLinecap="round"
-                            strokeDasharray={`${2 * Math.PI * 46}`}
-                            strokeDashoffset={`${2 * Math.PI * 46 * (1 - coveragePct / 100)}`}
-                            transform="rotate(-90 55 55)"
+                            strokeWidth="8" strokeLinecap="round"
+                            strokeDasharray={`${2 * Math.PI * 36}`}
+                            strokeDashoffset={`${2 * Math.PI * 36 * (1 - coveragePct / 100)}`}
+                            transform="rotate(-90 44 44)"
                             style={{ transition: "stroke-dashoffset 0.8s ease" }}
                           />
-                          <text x="55" y="55" textAnchor="middle" dominantBaseline="middle"
-                            style={{ fill: "var(--c-text)", fontSize: "18px", fontWeight: "800", fontFamily: "var(--font)" }}>
+                          <text x="44" y="44" textAnchor="middle" dominantBaseline="middle"
+                            style={{ fill: "var(--c-text)", fontSize: "14px", fontWeight: "800", fontFamily: "var(--font)" }}>
                             {coveragePct}%
                           </text>
                         </svg>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {[
+                            { label: "Covered", value: coveredCount, color: "#10b981" },
+                            { label: "Uncovered", value: missingCount, color: "#f87171" },
+                            { label: "Total", value: totalReqs, color: "var(--c-text-2)" },
+                          ].map(item => (
+                            <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
+                              <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: item.color }}>{item.value}</span>
+                              <span style={{ fontSize: "0.72rem", color: "var(--c-text-3)" }}>{item.label}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div style={{ display: "flex", justifyContent: "space-around" }}>
-                        <div style={{ textAlign: "center" }}>
-                          <div style={{ fontSize: "1.125rem", fontWeight: 700, color: "#10b981", lineHeight: 1 }}>{coveredCount}</div>
-                          <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginTop: 3 }}>Covered</div>
+                      {/* ASIL distribution */}
+                      {ASIL_ORDER.filter(a => asilDist[a]).map(asil => (
+                        <div key={asil} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{
+                                padding: "1px 6px", borderRadius: 4, fontSize: "0.6rem", fontWeight: 700,
+                                background: ASIL_BG[asil], color: ASIL_COLORS[asil],
+                                border: `1px solid ${ASIL_COLORS[asil]}30`,
+                              }}>
+                                {asil === "QM" ? "QM" : `ASIL-${asil}`}
+                              </span>
+                              <span style={{ fontSize: "0.72rem", color: "var(--c-text-3)" }}>
+                                {Math.round(((asilDist[asil] ?? 0) / testCases.length) * 100)}%
+                              </span>
+                            </div>
+                            <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text-2)", fontFamily: "var(--font-mono)" }}>
+                              {asilDist[asil]}
+                            </span>
+                          </div>
+                          <div style={{ height: 4, background: "var(--c-border)", borderRadius: 2, overflow: "hidden" }}>
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${((asilDist[asil] ?? 0) / maxAsilCount) * 100}%` }}
+                              transition={{ duration: 0.5 }}
+                              style={{ height: "100%", borderRadius: 2, background: ASIL_COLORS[asil] }}
+                            />
+                          </div>
                         </div>
-                        <div style={{ textAlign: "center" }}>
-                          <div style={{ fontSize: "1.125rem", fontWeight: 700, color: missingCount > 0 ? "#f87171" : "var(--c-text-3)", lineHeight: 1 }}>{missingCount}</div>
-                          <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginTop: 3 }}>Missing</div>
-                        </div>
-                        <div style={{ textAlign: "center" }}>
-                          <div style={{ fontSize: "1.125rem", fontWeight: 700, color: "var(--c-text-2)", lineHeight: 1 }}>{totalReqs}</div>
-                          <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginTop: 3 }}>Total</div>
-                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 3. REQUIREMENT VALIDATION ────────────────────────── */}
+                {reqAnalyses.length > 0 && (
+                  <div style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", borderRadius: 14, overflow: "hidden" }}>
+                    <div style={{
+                      padding: "14px 20px", borderBottom: "1px solid var(--c-border)",
+                      display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8,
+                    }}>
+                      <div>
+                        <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)" }}>Requirement Quality Analysis</span>
+                        <span style={{ marginLeft: 8, fontSize: "0.75rem", color: "var(--c-text-3)" }}>
+                          {reqAnalyses.filter(r => r.flags.some(f => f !== "valid")).length} requirements have issues
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {(Object.entries(flagCounts) as [ReqFlag, number][])
+                          .filter(([k, v]) => k !== "valid" && v > 0)
+                          .map(([flag, count]) => {
+                            const cfg = FLAG_CONFIG[flag];
+                            return (
+                              <span key={flag} style={{
+                                fontSize: "0.68rem", fontWeight: 600, padding: "2px 8px", borderRadius: 5,
+                                background: cfg.color + "12", border: `1px solid ${cfg.color}30`,
+                                color: cfg.color,
+                              }}>
+                                {count} {cfg.label}
+                              </span>
+                            );
+                          })}
                       </div>
                     </div>
-                  )}
-                </div>
+
+                    {/* Legend row */}
+                    <div style={{
+                      display: "flex", gap: 16, padding: "8px 16px",
+                      background: "var(--c-bg-2)", borderBottom: "1px solid var(--c-border)",
+                      fontSize: "0.6875rem", color: "var(--c-text-3)", flexWrap: "wrap",
+                    }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}><CheckCircle2 size={11} color="#10b981" /> Covered</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}><XCircle size={11} color="#f87171" /> Uncovered</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} /> High risk</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} /> Medium risk</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", display: "inline-block" }} /> Low risk</span>
+                      <span style={{ color: "var(--c-text-3)", marginLeft: "auto" }}>Click a row to see issue details</span>
+                    </div>
+
+                    <div style={{ overflowX: "auto" }}>
+                      {reqAnalyses.map((req, i) => (
+                        <ReqRow key={req.id || i} req={req} index={i} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 4. TEST TYPE DISTRIBUTION ─────────────────────────── */}
+                {Object.keys(typeDist).length > 0 && (
+                  <div style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", borderRadius: 14, overflow: "hidden" }}>
+                    <SectionHeader title="Test Type Distribution" />
+                    <div style={{ padding: "16px 20px" }}>
+                      {Object.entries(typeDist)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([type, count]) => (
+                          <BarRow key={type} label={type} count={count} max={maxTypeCount} color={TYPE_COLORS[type] ?? "#818cf8"} />
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Info note when no requirement text */}
+                {reqAnalyses.length === 0 && hasData && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "14px 18px",
+                    borderRadius: 10, background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
+                  }}>
+                    <Info size={15} color="var(--c-text-3)" />
+                    <span style={{ fontSize: "0.8125rem", color: "var(--c-text-3)" }}>
+                      Requirement text not available for this run — requirement quality analysis requires requirement text to be stored during generation.
+                    </span>
+                  </div>
+                )}
+
               </div>
             )}
           </>

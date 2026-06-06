@@ -78,6 +78,7 @@ class ProviderKeyRequest(BaseModel):
     provider: str
     api_key: Optional[str] = None
     endpoint: Optional[str] = None
+    model: Optional[str] = None
 
 
 class TextRequest(BaseModel):

@@ -4,9 +4,10 @@ from .base import LLMProvider
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self) -> None:
-        self._client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
-        self._model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+        resolved_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        self._client = anthropic.Anthropic(api_key=resolved_key)
+        self._model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
     @property
     def model_name(self) -> str:

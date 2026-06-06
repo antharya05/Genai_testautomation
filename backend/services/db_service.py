@@ -14,13 +14,28 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 from sqlalchemy.orm import Session
 
 from db_models import Project, Requirement, Run, TestCaseDB
 
 DEFAULT_PROJECT_ID = "00000000-0000-0000-0000-000000000001"
 DEFAULT_PROJECT_NAME = "Default Project"
+
+
+def ensure_review_columns(db: Session) -> None:
+    """Add review columns to test_cases if they don't exist (zero-downtime migration)."""
+    for col_def in [
+        "review_status VARCHAR(20) DEFAULT 'pending'",
+        "review_note TEXT",
+        "reviewed_at VARCHAR(50)",
+    ]:
+        col_name = col_def.split()[0]
+        try:
+            db.execute(text(f"ALTER TABLE test_cases ADD COLUMN {col_def}"))
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 # ─────────────────────────────────────────────
@@ -62,6 +77,29 @@ def create_project(db: Session, name: str, description: str = "") -> Project:
     db.commit()
     db.refresh(project)
     return project
+
+
+def update_project(db: Session, project_id: str, name: Optional[str] = None, description: Optional[str] = None) -> Optional[Project]:
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return None
+    if name is not None:
+        project.name = name  # type: ignore[assignment]
+    if description is not None:
+        project.description = description  # type: ignore[assignment]
+    project.updated_at = datetime.utcnow()  # type: ignore[assignment]
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def delete_project(db: Session, project_id: str) -> bool:
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return False
+    db.delete(project)
+    db.commit()
+    return True
 
 
 # ─────────────────────────────────────────────
@@ -224,6 +262,25 @@ def get_test_cases_for_run(db: Session, run_id: str) -> list[TestCaseDB]:
     return db.query(TestCaseDB).filter(TestCaseDB.run_id == run_id).all()
 
 
+def patch_test_case_review(
+    db: Session,
+    test_id: str,
+    review_status: Optional[str] = None,
+    review_note: Optional[str] = None,
+) -> Optional[TestCaseDB]:
+    tc = db.query(TestCaseDB).filter(TestCaseDB.test_id == test_id).first()
+    if not tc:
+        return None
+    if review_status is not None:
+        tc.review_status = review_status  # type: ignore[assignment]
+    if review_note is not None:
+        tc.review_note = review_note  # type: ignore[assignment]
+    tc.reviewed_at = datetime.utcnow().isoformat()  # type: ignore[assignment]
+    db.commit()
+    db.refresh(tc)
+    return tc
+
+
 def get_requirements_for_run(db: Session, run_id: str) -> list[Requirement]:
     return (
         db.query(Requirement)
@@ -290,4 +347,7 @@ def tc_to_dict(tc: TestCaseDB) -> dict:
         "validation_status": tc.validation_status or "valid",
         "rag_sources": tc.rag_sources or [],
         "rag_top_score": tc.rag_top_score or 0.0,
+        "review_status": tc.review_status or "pending",
+        "review_note": tc.review_note or "",
+        "reviewed_at": tc.reviewed_at or None,
     }

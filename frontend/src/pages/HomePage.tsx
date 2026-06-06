@@ -110,7 +110,7 @@ function NavBar() {
           <Zap size={14} color="white" fill="white" />
         </div>
         <span style={{ color: 'white', fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em' }}>
-          AutoTest AI
+          Automotive TC Generator
         </span>
       </div>
 
@@ -874,6 +874,94 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ── Validation & Risk Analysis ── */}
+      <section style={{
+        padding: '100px 40px',
+        background: 'rgba(255,255,255,0.008)',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+          <SectionHeader
+            eyebrow="Validation"
+            eyebrowColor="#34d399"
+            eyebrowBg="rgba(52,211,153,0.1)"
+            eyebrowBorder="rgba(52,211,153,0.2)"
+            title="Validation & Risk Analysis"
+            sub="Automated quality gates that verify completeness, consistency, and safety classification before export."
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+            {[
+              {
+                icon: CheckCircle2, color: '#34d399',
+                title: 'Consistency Validation',
+                desc: 'Cross-check requirements for conflicting constraints, duplicate identifiers, and missing ASIL classifications.',
+              },
+              {
+                icon: Shield, color: '#60a5fa',
+                title: 'Coverage Gap Detection',
+                desc: 'Identify requirements with zero test cases and functional areas with insufficient test type coverage.',
+              },
+              {
+                icon: Zap, color: '#f59e0b',
+                title: 'Risk Classification',
+                desc: 'Automatically classify test cases by risk severity using ASIL level, test type, and expected result criticality.',
+              },
+              {
+                icon: BookOpen, color: '#a78bfa',
+                title: 'ASIL Compliance Review',
+                desc: 'Verify that test case distribution meets ISO 26262 Part 6 requirements for each ASIL level in the requirement set.',
+              },
+              {
+                icon: GitBranch, color: '#f472b6',
+                title: 'Traceability Completeness',
+                desc: 'Validate end-to-end requirement-to-test traceability and flag any orphaned test cases or uncovered requirements.',
+              },
+            ].map((item, i) => (
+              <motion.div
+                key={item.title}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: '-40px' }}
+                transition={{ duration: 0.35, delay: i * 0.07 }}
+                whileHover={{ y: -5, transition: { duration: 0.2 } }}
+                style={{
+                  background: 'rgba(255,255,255,0.025)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  borderTop: `1px solid ${item.color}30`,
+                  borderRadius: 16, padding: '26px 24px',
+                  cursor: 'default',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)',
+                  transition: 'border-color 0.2s, box-shadow 0.2s',
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.borderTopColor = item.color + '60';
+                  el.style.boxShadow = `0 16px 48px rgba(0,0,0,0.38), 0 0 0 1px ${item.color}14, inset 0 1px 0 rgba(255,255,255,0.07)`;
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.borderTopColor = item.color + '30';
+                  el.style.boxShadow = '0 4px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)';
+                }}
+              >
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10, marginBottom: 18,
+                  background: item.color + '16', border: `1px solid ${item.color}28`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: `0 0 18px ${item.color}12`,
+                }}>
+                  <item.icon size={18} color={item.color} strokeWidth={1.75} />
+                </div>
+                <h3 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white', margin: '0 0 9px', letterSpacing: '-0.01em' }}>{item.title}</h3>
+                <p style={{ fontSize: '0.8375rem', color: 'rgba(255,255,255,0.4)', margin: 0, lineHeight: 1.65 }}>{item.desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── CTA ── */}
       <section style={{ padding: '0 40px 100px', textAlign: 'center' }}>
         <motion.div
@@ -916,7 +1004,7 @@ export default function HomePage() {
           <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Zap size={12} color="white" fill="white" />
           </div>
-          <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: '0.875rem', fontWeight: 600 }}>AutoTest AI</span>
+          <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: '0.875rem', fontWeight: 600 }}>Automotive Test Case Generator</span>
         </div>
         <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8125rem', margin: 0 }}>
           ISO 26262 Automotive Validation Platform

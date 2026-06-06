@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { JobStatus, Project, ProjectStats, ProviderConfig, Run, TestCase, UploadResult } from "../types";
+import type { ActiveProvider, JobStatus, Project, ProjectStats, ProviderConfig, Run, TestCase, UploadResult } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -32,14 +32,10 @@ export async function parseText(text: string): Promise<UploadResult> {
 export async function startGeneration(
   requirements: string[],
   projectId?: string,
-  provider?: string,
-  model?: string,
 ): Promise<{ job_id: string; total: number }> {
   const res = await api.post<{ job_id: string; total: number }>("/generate", {
     requirements,
     project_id: projectId ?? null,
-    provider: provider ?? null,
-    model: model ?? null,
   });
   return res.data;
 }
@@ -104,6 +100,15 @@ export async function getProjectStats(projectId: string): Promise<ProjectStats> 
   return res.data;
 }
 
+export async function updateProject(projectId: string, name?: string, description?: string): Promise<Project> {
+  const res = await api.patch<Project>(`/projects/${projectId}`, { name, description });
+  return res.data;
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await api.delete(`/projects/${projectId}`);
+}
+
 // ─── Runs ─────────────────────────────────────────────────────────────────────
 
 export async function getProjectRuns(projectId: string, limit = 50): Promise<Run[]> {
@@ -133,10 +138,29 @@ export async function listProviderKeys(): Promise<ProviderConfig[]> {
   return res.data;
 }
 
-export async function saveProviderKey(provider: string, apiKey?: string, endpoint?: string): Promise<void> {
-  await api.post("/providers/keys", { provider, api_key: apiKey, endpoint });
+export async function saveProviderKey(provider: string, apiKey?: string, endpoint?: string, model?: string): Promise<void> {
+  await api.post("/providers/keys", { provider, api_key: apiKey, endpoint, model });
+}
+
+export async function getActiveProvider(): Promise<ActiveProvider> {
+  const res = await api.get<ActiveProvider>("/providers/active");
+  return res.data;
 }
 
 export async function deleteProviderKey(provider: string): Promise<void> {
   await api.delete(`/providers/keys/${provider}`);
+}
+
+// ─── Review ───────────────────────────────────────────────────────────────────
+
+export async function patchTestCaseReview(
+  testId: string,
+  reviewStatus?: string,
+  reviewNote?: string,
+): Promise<TestCase> {
+  const body: Record<string, string> = {};
+  if (reviewStatus !== undefined) body.review_status = reviewStatus;
+  if (reviewNote !== undefined) body.review_note = reviewNote;
+  const res = await api.patch<TestCase>(`/test-cases/${testId}/review`, body);
+  return res.data;
 }

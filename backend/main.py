@@ -43,7 +43,9 @@ from services.db_service import (
     complete_run,
     create_project,
     create_run,
+    delete_project,
     ensure_default_project,
+    ensure_review_columns,
     fail_run,
     get_project,
     get_project_stats,
@@ -52,10 +54,12 @@ from services.db_service import (
     get_runs_for_project,
     get_test_cases_for_run,
     list_projects,
+    patch_test_case_review,
     project_to_dict,
     run_to_dict,
     sweep_interrupted_runs,
     tc_to_dict,
+    update_project,
 )
 from services.generator import run_batch
 from services.rag import rag_pipeline
@@ -76,6 +80,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         ensure_default_project(db)
+        ensure_review_columns(db)
         swept = sweep_interrupted_runs(db)
         if swept:
             logger.warning("Swept %d interrupted run(s) → status=error.", swept)
@@ -145,6 +150,15 @@ _EXTRACTORS = {".pdf": _extract_pdf, ".docx": _extract_docx, ".txt": _extract_tx
 def health():
     from services import cache
 
+    db = SessionLocal()
+    try:
+        active_prov = db.query(db_models.AppConfig).filter(db_models.AppConfig.key == "active_provider").first()
+        provider_name = (active_prov.value if active_prov else None) or os.getenv("PROVIDER", "anthropic")
+    except Exception:
+        provider_name = os.getenv("PROVIDER", "anthropic")
+    finally:
+        db.close()
+
     rag_chunks = 0
     rag_status = "disabled"
     if rag_pipeline.is_ready:
@@ -158,7 +172,7 @@ def health():
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
-        "provider": os.getenv("PROVIDER", "anthropic").lower(),
+        "provider": provider_name.lower(),
         "rag_status": rag_status,
         "rag_ready": rag_pipeline.is_ready,
         "rag_indexed_chunks": rag_chunks,
@@ -213,13 +227,13 @@ async def parse_text(request: TextRequest):
 # Generation — async job + SSE streaming
 # ─────────────────────────────────────────────
 
-async def _run_and_persist(requirements: list[str], job_id: str) -> None:
+async def _run_and_persist(requirements: list[str], job_id: str, provider=None) -> None:
     """
     Wraps run_batch with DB persistence.
     run_batch streams incremental progress into _jobs[job_id].
     After completion this function writes the final state to the DB.
     """
-    await run_batch(requirements, job_id, _jobs)
+    await run_batch(requirements, job_id, _jobs, provider=provider)
 
     db = SessionLocal()
     try:
@@ -248,25 +262,27 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
     project_id = request.project_id or DEFAULT_PROJECT_ID
     job_id = str(uuid.uuid4())
 
-    # Capture provider / model for run metadata
-    provider_name = (request.provider or os.getenv("PROVIDER", "anthropic")).lower()
-    model_name = request.model or "unknown"
-    if model_name == "unknown":
-        try:
-            from providers import get_provider
-            model_name = get_provider().model_name
-        except Exception:
-            pass
-
-    # Create the Run record before the background task starts
+    # Resolve provider from DB settings (BYOK), fall back to env vars
+    from providers import get_provider_from_db, get_provider
     db = SessionLocal()
     try:
+        try:
+            provider_instance = get_provider_from_db(db)
+        except Exception:
+            provider_instance = get_provider()
+
+        provider_name = provider_instance.model_name  # reuse after assignment
+        model_name = provider_instance.model_name
+
+        # Extract the actual provider label (class name prefix) for the Run record
+        provider_label = type(provider_instance).__name__.replace("Provider", "").lower()
+
         create_run(
             db,
             job_id=job_id,
             project_id=project_id,
             requirements=request.requirements,
-            provider=provider_name,
+            provider=provider_label,
             model=model_name,
             prompt_version=get_current_version(),
         )
@@ -284,7 +300,7 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
         "error": None,
     }
 
-    background_tasks.add_task(_run_and_persist, request.requirements, job_id)
+    background_tasks.add_task(_run_and_persist, request.requirements, job_id, provider_instance)
     return {"job_id": job_id, "total": len(request.requirements)}
 
 
@@ -370,6 +386,32 @@ async def create_project_route(body: dict):
         db.close()
 
 
+@app.patch("/projects/{project_id}")
+async def update_project_route(project_id: str, body: dict):
+    db = SessionLocal()
+    try:
+        name = body.get("name")
+        description = body.get("description")
+        project = update_project(db, project_id, name=name, description=description)
+        if not project:
+            return {"error": f"Project {project_id} not found"}
+        return project_to_dict(project)
+    finally:
+        db.close()
+
+
+@app.delete("/projects/{project_id}")
+def delete_project_route(project_id: str):
+    if project_id == DEFAULT_PROJECT_ID:
+        return {"error": "Cannot delete the default project"}
+    db = SessionLocal()
+    try:
+        ok = delete_project(db, project_id)
+        return {"ok": ok}
+    finally:
+        db.close()
+
+
 @app.get("/projects/{project_id}")
 def get_project_route(project_id: str):
     db = SessionLocal()
@@ -421,6 +463,24 @@ def get_run_test_cases(run_id: str):
     db = SessionLocal()
     try:
         return [tc_to_dict(tc) for tc in get_test_cases_for_run(db, run_id)]
+    finally:
+        db.close()
+
+
+@app.patch("/test-cases/{test_id}/review")
+def patch_test_case_review_route(test_id: str, body: dict):
+    db = SessionLocal()
+    try:
+        tc = patch_test_case_review(
+            db,
+            test_id=test_id,
+            review_status=body.get("review_status"),
+            review_note=body.get("review_note"),
+        )
+        if not tc:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Test case not found")
+        return tc_to_dict(tc)
     finally:
         db.close()
 
@@ -497,6 +557,34 @@ def clear_cache():
 # Provider key management (BYOK)
 # ─────────────────────────────────────────────
 
+@app.get("/providers/active")
+def get_active_provider():
+    """Returns the currently active provider/model configuration."""
+    db = SessionLocal()
+    try:
+        active_prov = db.query(db_models.AppConfig).filter(db_models.AppConfig.key == "active_provider").first()
+        active_model = db.query(db_models.AppConfig).filter(db_models.AppConfig.key == "active_model").first()
+
+        provider_name = (active_prov.value if active_prov else None) or os.getenv("PROVIDER", "anthropic")
+        model = (active_model.value if active_model else None) or "claude-sonnet-4-6"
+
+        pk = db.query(db_models.ProviderKey).filter(db_models.ProviderKey.provider == provider_name).first()
+
+        # Provider-specific env var fallbacks (optional defaults, not required)
+        _provider_env_keys = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "gemini": "GOOGLE_API_KEY",
+            "groq": "GROQ_API_KEY",
+        }
+        env_var = _provider_env_keys.get(provider_name, "")
+        has_key = bool(pk and pk.api_key) or bool(env_var and os.getenv(env_var))
+
+        return {"provider": provider_name, "model": model, "has_key": has_key}
+    finally:
+        db.close()
+
+
 @app.get("/providers/keys")
 def list_provider_keys():
     db = SessionLocal()
@@ -529,6 +617,20 @@ def save_provider_key(request: ProviderKeyRequest):
                 endpoint=request.endpoint,
             )
             db.add(key)
+
+        # Persist selected provider + model as the active configuration
+        def _upsert_config(k: str, v: str) -> None:
+            row = db.query(db_models.AppConfig).filter(db_models.AppConfig.key == k).first()
+            if row:
+                row.value = v
+                row.updated_at = datetime.utcnow()
+            else:
+                db.add(db_models.AppConfig(key=k, value=v))
+
+        _upsert_config("active_provider", request.provider)
+        if request.model:
+            _upsert_config("active_model", request.model)
+
         db.commit()
         return {"ok": True}
     finally:

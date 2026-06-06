@@ -14,10 +14,9 @@ import { useEffect, useState } from "react";
 import type { ElementType } from "react";
 import { Link } from "react-router-dom";
 import { getProjectRuns, getRunTestCases, getRunRequirements } from "../../api/client";
+import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
 import type { Run, TestCase } from "../../types";
-
-const DEFAULT_PROJECT_ID = "00000000-0000-0000-0000-000000000001";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -430,16 +429,25 @@ function MetaStat({ icon: Icon, value }: { icon: ElementType; value: string }) {
 // ─── RunsPage ─────────────────────────────────────────────────────────────────
 
 export default function RunsPage() {
+  const { selectedProject } = useProject();
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   async function loadRuns() {
+    if (!selectedProject) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getProjectRuns(DEFAULT_PROJECT_ID, 50);
+      const data = await getProjectRuns(selectedProject.id, 50);
       setRuns(data);
     } catch {
       setError("Could not load runs. Is the backend running?");
@@ -448,7 +456,7 @@ export default function RunsPage() {
     }
   }
 
-  useEffect(() => { loadRuns(); }, []);
+  useEffect(() => { loadRuns(); }, [selectedProject]);
 
   function toggleExpand(id: string) {
     setExpandedId((prev) => (prev === id ? null : id));
@@ -478,7 +486,7 @@ export default function RunsPage() {
               </h1>
             </div>
             <p style={{ color: "var(--c-text-2)", fontSize: "0.875rem", margin: 0 }}>
-              All generation runs for Default Project
+              All generation runs for {selectedProject?.name ?? "—"}
             </p>
           </div>
 
@@ -515,7 +523,7 @@ export default function RunsPage() {
 
         {/* ── Summary stats ────────────────────────────────────── */}
         {!loading && runs.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 10, marginBottom: 24 }}>
             {[
               { label: "Total Runs", value: runs.length, color: "#818cf8" },
               { label: "Test Cases Generated", value: totalCases, color: "#34d399" },

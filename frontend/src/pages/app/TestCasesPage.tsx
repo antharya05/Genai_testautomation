@@ -3,6 +3,7 @@ import { ChevronDown, ListChecks, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getProjectRuns, getRunTestCases } from "../../api/client";
+import { useProject } from "../../context/ProjectContext";
 import { ExportModal } from "../../components/export/ExportModal";
 import { PageTransition } from "../../components/layout/PageTransition";
 import { TestCaseTable } from "../../components/review/TestCaseTable";
@@ -10,8 +11,6 @@ import { ToastContainer } from "../../components/ui/Toast";
 import { useToast } from "../../hooks/useToast";
 import { useUndoRedo } from "../../hooks/useUndoRedo";
 import type { Run, TestCase } from "../../types";
-
-const DEFAULT_PROJECT_ID = "00000000-0000-0000-0000-000000000001";
 
 const TYPE_COLORS: Record<string, string> = {
   functional: "#818cf8",
@@ -33,6 +32,7 @@ function formatDate(iso: string): string {
 }
 
 export default function TestCasesPage() {
+  const { selectedProject } = useProject();
   const [searchParams] = useSearchParams();
   const urlRunId = searchParams.get("runId");
 
@@ -53,7 +53,8 @@ export default function TestCasesPage() {
 
   // Load completed runs for the selector
   useEffect(() => {
-    getProjectRuns(DEFAULT_PROJECT_ID, 30)
+    if (!selectedProject) return;
+    getProjectRuns(selectedProject.id, 30)
       .then(r => {
         const completed = r.filter(run => run.status === "complete");
         setRuns(completed);
@@ -63,7 +64,7 @@ export default function TestCasesPage() {
       })
       .catch(() => {})
       .finally(() => setLoadingRuns(false));
-  }, [urlRunId]);
+  }, [urlRunId, selectedProject]);
 
   // Load test cases when the selected run changes
   useEffect(() => {

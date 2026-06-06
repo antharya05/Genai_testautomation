@@ -24,10 +24,13 @@
  */
 
 import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle2, ChevronDown, FileText, FolderOpen, GitBranch, Sparkles } from "lucide-react";
+import { CheckCircle2, ChevronDown, Cpu, FileText, FolderOpen, GitBranch, Sparkles } from "lucide-react";
+import { formatModelName } from "../../utils/format";
 import { type ElementType, useCallback, useEffect, useRef, useState } from "react";
-import { getProjectRuns, getProjectStats, listProjects, openJobStream, startGeneration } from "../../api/client";
-import type { Project, ProjectStats, Run } from "../../types";
+import { useNavigate } from "react-router-dom";
+import { getActiveProvider, getProjectRuns, getProjectStats, openJobStream, startGeneration } from "../../api/client";
+import { useProject } from "../../context/ProjectContext";
+import type { ActiveProvider, Project, ProjectStats, Run } from "../../types";
 import { GeneratingScreen } from "../../components/GeneratingScreen";
 import { ExportModal } from "../../components/export/ExportModal";
 import { RequirementsPanel } from "../../components/RequirementsPanel";
@@ -45,20 +48,6 @@ import type { TestCase, UploadResult } from "../../types";
 // Phase "review" = pre-generation requirements selection (Analysis in the approved spec).
 // Phase "results" = post-generation test case review (Review + Export in the approved spec).
 type Phase = "upload" | "review" | "generating" | "results";
-
-// ─── Provider / model catalogue ───────────────────────────────────────────────
-
-const PROVIDER_MODELS: Record<string, string[]> = {
-  "Anthropic":  ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"],
-  "OpenAI":     ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-  "Gemini":     ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-  "Groq":       ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
-  "OpenRouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "google/gemini-pro-1.5"],
-  "Ollama":     ["llama3.2", "mistral", "codellama"],
-};
-
-const DEFAULT_PROVIDER = "Anthropic";
-const DEFAULT_MODEL    = "claude-sonnet-4-6";
 
 // ─── Sidebar stat row ─────────────────────────────────────────────────────────
 
@@ -332,30 +321,21 @@ function ProjectContextCard({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function GeneratePage() {
-  // ── Provider / model selection ──────────────────────────────────────────────
-  const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDER);
-  const [selectedModel, setSelectedModel]       = useState(DEFAULT_MODEL);
+  const navigate = useNavigate();
 
-  function handleProviderChange(provider: string) {
-    setSelectedProvider(provider);
-    setSelectedModel(PROVIDER_MODELS[provider]?.[0] ?? "");
-  }
+  // ── Active provider (read-only — configured in Settings) ───────────────────
+  const [activeProvider, setActiveProvider] = useState<ActiveProvider | null>(null);
+
+  useEffect(() => {
+    getActiveProvider().then(setActiveProvider).catch(() => {});
+  }, []);
 
   // ── Project context ─────────────────────────────────────────────────────────
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const { projects, selectedProject, setSelectedProject } = useProject();
   const projectId = selectedProject?.id ?? "00000000-0000-0000-0000-000000000001";
   const [projectStats, setProjectStats] = useState<ProjectStats | null>(null);
   const [lastRun, setLastRun] = useState<Run | null>(null);
-
-  useEffect(() => {
-    listProjects()
-      .then(list => {
-        setProjects(list);
-        if (list.length > 0) setSelectedProject(list[0]);
-      })
-      .catch(() => {});
-  }, []);
+  const [lastJobId, setLastJobId] = useState<string | null>(null);
 
   const loadProjectData = useCallback(() => {
     getProjectStats(projectId).then(setProjectStats).catch(() => {});
@@ -368,6 +348,14 @@ export default function GeneratePage() {
   }, [projectId]);
 
   useEffect(() => { loadProjectData(); }, [loadProjectData]);
+
+  // ── Mobile detection ────────────────────────────────────────────────────────
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   // ── Phase and upload state ──────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>("upload");
@@ -433,7 +421,8 @@ export default function GeneratePage() {
     });
 
     try {
-      const { job_id } = await startGeneration(requirements, projectId, selectedProvider, selectedModel);
+      const { job_id } = await startGeneration(requirements, projectId);
+      setLastJobId(job_id);
       const es = openJobStream(job_id);
       esRef.current = es;
 
@@ -563,7 +552,7 @@ export default function GeneratePage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ padding: "32px 40px 64px", display: "flex", gap: 24, alignItems: "flex-start" }}
+            style={{ padding: isMobile ? "24px 16px 64px" : "32px 40px 64px", display: "flex", flexDirection: isMobile ? "column" : "row", gap: 24, alignItems: "flex-start" }}
           >
             {/* Requirements list — centered within its flex region */}
             <div style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "center" }}>
@@ -575,7 +564,7 @@ export default function GeneratePage() {
             </div>
 
             {/* Analysis sidebar */}
-            <div style={{ width: 240, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10, paddingTop: 4 }}>
+            <div style={{ width: isMobile ? "100%" : 240, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10, paddingTop: 4 }}>
 
               {/* Source */}
               <div style={{
@@ -600,41 +589,31 @@ export default function GeneratePage() {
                   Generation
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {/* Provider dropdown */}
+                  {/* Active model — read-only, configured in Settings */}
                   <div>
-                    <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginBottom: 4 }}>Provider</div>
-                    <select
-                      value={selectedProvider}
-                      onChange={e => handleProviderChange(e.target.value)}
-                      style={{
-                        width: "100%", padding: "6px 8px", borderRadius: 7,
-                        background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-                        color: "var(--c-text)", fontSize: "0.8125rem", fontFamily: "var(--font)",
-                        outline: "none", cursor: "pointer", appearance: "auto",
-                      }}
-                    >
-                      {Object.keys(PROVIDER_MODELS).map(p => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {/* Model dropdown */}
-                  <div>
-                    <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginBottom: 4 }}>Model</div>
-                    <select
-                      value={selectedModel}
-                      onChange={e => setSelectedModel(e.target.value)}
-                      style={{
-                        width: "100%", padding: "6px 8px", borderRadius: 7,
-                        background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-                        color: "var(--c-text)", fontSize: "0.8125rem", fontFamily: "var(--font)",
-                        outline: "none", cursor: "pointer", appearance: "auto",
-                      }}
-                    >
-                      {(PROVIDER_MODELS[selectedProvider] ?? []).map(m => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
+                    <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginBottom: 6 }}>Using</div>
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 7,
+                      padding: "7px 10px", borderRadius: 7,
+                      background: activeProvider?.has_key ? "rgba(16,185,129,0.06)" : "var(--c-bg-2)",
+                      border: `1px solid ${activeProvider?.has_key ? "rgba(16,185,129,0.2)" : "var(--c-border)"}`,
+                    }}>
+                      <Cpu size={12} color={activeProvider?.has_key ? "#10b981" : "var(--c-text-3)"} strokeWidth={2} style={{ flexShrink: 0 }} />
+                      <span style={{
+                        fontSize: "0.75rem", fontWeight: 600,
+                        color: activeProvider?.has_key ? "#10b981" : "var(--c-text-3)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {activeProvider?.model
+                          ? formatModelName(activeProvider.model)
+                          : "Not configured"}
+                      </span>
+                    </div>
+                    {!activeProvider?.has_key && (
+                      <div style={{ fontSize: "0.6875rem", color: "#f59e0b", marginTop: 5 }}>
+                        Configure an API key in Settings
+                      </div>
+                    )}
                   </div>
                   <div style={{ paddingTop: 8, borderTop: "1px solid var(--c-border)", marginTop: 2 }}>
                     <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginBottom: 4 }}>
@@ -712,16 +691,80 @@ export default function GeneratePage() {
               display: "flex",
               flexDirection: "column",
               gap: 24,
-              // Extra bottom padding so the last card clears the viewport
               paddingBottom: 64,
             }}
           >
-            {/*
-             * TestCaseTable = Milestone 1 review surface.
-             * Inline title editing, delete, undo/redo, sort/filter.
-             * Sprint 2 adds: approve/flag/reject states, reviewer attribution.
-             * TODO Sprint 2: pass projectId and runId for persistence.
-             */}
+            {/* ── Next-step CTA banner ─────────────────────────────────────── */}
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              style={{
+                background: "rgba(16,185,129,0.06)",
+                border: "1px solid rgba(16,185,129,0.2)",
+                borderRadius: 12, padding: "14px 20px",
+                display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 200 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+                <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)" }}>
+                  {testCases.length} test cases generated
+                </span>
+                <span style={{ fontSize: "0.8125rem", color: "var(--c-text-3)" }}>— what's next?</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => navigate(lastJobId ? `/app/review?runId=${lastJobId}` : "/app/review")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 14px", borderRadius: 8, cursor: "pointer",
+                    background: "var(--c-accent)", border: "1px solid var(--c-accent)",
+                    color: "white", fontSize: "0.8125rem", fontWeight: 600, fontFamily: "var(--font)",
+                  }}
+                >
+                  <CheckCircle2 size={13} />
+                  Review Cases
+                </button>
+                <button
+                  onClick={() => navigate(lastJobId ? `/app/validation?runId=${lastJobId}` : "/app/validation")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+                    background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
+                    color: "var(--c-text-2)", fontSize: "0.8125rem", fontWeight: 500, fontFamily: "var(--font)",
+                  }}
+                >
+                  <Cpu size={13} />
+                  Validation Report
+                </button>
+                <button
+                  onClick={() => navigate(lastJobId ? `/app/traceability?runId=${lastJobId}` : "/app/traceability")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+                    background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
+                    color: "var(--c-text-2)", fontSize: "0.8125rem", fontWeight: 500, fontFamily: "var(--font)",
+                  }}
+                >
+                  <GitBranch size={13} />
+                  Traceability
+                </button>
+                <button
+                  onClick={() => setShowExport(true)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+                    background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
+                    color: "var(--c-text-2)", fontSize: "0.8125rem", fontWeight: 500, fontFamily: "var(--font)",
+                  }}
+                >
+                  <FileText size={13} />
+                  Export
+                </button>
+              </div>
+            </motion.div>
+
             <TestCaseTable
               testCases={testCases}
               onEdit={handleEdit}

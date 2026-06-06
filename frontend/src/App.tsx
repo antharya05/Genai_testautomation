@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ProjectProvider } from './context/ProjectContext';
 import HomePage from './pages/HomePage';
 import SignInPage from './pages/SignInPage';
 import AppShell from './pages/app/AppShell';
@@ -13,6 +14,7 @@ import SettingsPage from './pages/app/SettingsPage';
 import ValidationPage from './pages/app/ValidationPage';
 import TestCasesPage from './pages/app/TestCasesPage';
 import TraceabilityPage from './pages/app/TraceabilityPage';
+import ReviewPage from './pages/app/ReviewPage';
 
 function ThemeInit() {
   useEffect(() => {
@@ -45,6 +47,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <AuthProvider>
+      <ProjectProvider>
       <BrowserRouter>
         <ThemeInit />
         <Routes>
@@ -63,6 +66,7 @@ export default function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="generate" element={<GeneratePage />} />
+            <Route path="review" element={<ReviewPage />} />
             <Route path="test-cases" element={<TestCasesPage />} />
             <Route path="validation" element={<ValidationPage />} />
             <Route path="traceability" element={<TraceabilityPage />} />
@@ -74,6 +78,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </ProjectProvider>
     </AuthProvider>
   );
 }

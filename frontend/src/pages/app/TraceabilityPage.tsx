@@ -12,10 +12,9 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getProjectRuns, getRunRequirements, getRunTestCases } from "../../api/client";
+import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
 import type { Run, TestCase } from "../../types";
-
-const DEFAULT_PROJECT_ID = "00000000-0000-0000-0000-000000000001";
 
 const ASIL_COLORS: Record<string, string> = {
   QM: "#94a3b8", A: "#10b981", B: "#f59e0b", C: "#f97316", D: "#ef4444",
@@ -38,6 +37,7 @@ interface Requirement {
 type CoverageFilter = "all" | "covered" | "uncovered";
 
 export default function TraceabilityPage() {
+  const { selectedProject } = useProject();
   const [searchParams] = useSearchParams();
   const urlRunId = searchParams.get("runId");
 
@@ -55,7 +55,8 @@ export default function TraceabilityPage() {
 
   // Load completed runs
   useEffect(() => {
-    getProjectRuns(DEFAULT_PROJECT_ID, 30)
+    if (!selectedProject) return;
+    getProjectRuns(selectedProject.id, 30)
       .then(r => {
         const completed = r.filter(run => run.status === "complete");
         setRuns(completed);
@@ -65,7 +66,7 @@ export default function TraceabilityPage() {
       })
       .catch(() => {})
       .finally(() => setLoadingRuns(false));
-  }, [urlRunId]);
+  }, [urlRunId, selectedProject]);
 
   // Load requirements + test cases when run changes
   useEffect(() => {

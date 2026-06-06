@@ -4,9 +4,10 @@ from .base import LLMProvider
 
 
 class GroqProvider(LLMProvider):
-    def __init__(self) -> None:
-        self._client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
-        self._model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+        resolved_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self._client = Groq(api_key=resolved_key)
+        self._model = model or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     @property
     def model_name(self) -> str:

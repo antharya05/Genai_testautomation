@@ -61,6 +61,7 @@ async def _generate_one(
     requirement: str,
     tc_offset: int,
     prompt_version: str,
+    provider=None,
 ) -> tuple[list, int, list[dict]]:
     """
     Generate test cases for a single requirement.
@@ -80,7 +81,8 @@ async def _generate_one(
             tc.test_id = f"TC_{tc_offset + i + 1:03d}"
         return cases, 0, []
 
-    provider = get_provider()
+    if provider is None:
+        provider = get_provider()
     system_prompt = get_prompt("generate", prompt_version)
 
     # ── RAG enrichment ────────────────────────────────────────────
@@ -135,7 +137,7 @@ async def _generate_one(
     return [], MAX_RETRIES, []
 
 
-async def run_batch(requirements: list[str], job_id: str, jobs: dict) -> None:
+async def run_batch(requirements: list[str], job_id: str, jobs: dict, provider=None) -> None:
     """
     Process all requirements concurrently and stream results via jobs dict.
     The SSE endpoint reads jobs[job_id] every 400ms to stream progress to frontend.
@@ -151,7 +153,7 @@ async def run_batch(requirements: list[str], job_id: str, jobs: dict) -> None:
     async def process(req: str, idx: int) -> None:
         nonlocal tc_offset
         async with semaphore:
-            cases, retries, rag_chunks = await _generate_one(req, tc_offset, prompt_version)
+            cases, retries, rag_chunks = await _generate_one(req, tc_offset, prompt_version, provider)
             tc_offset += len(cases)
 
             unique = []

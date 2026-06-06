@@ -1,165 +1,32 @@
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Key, LogOut, Palette, Settings, Trash2, User } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, LogOut, Palette, Settings, Trash2, User, Wifi, WifiOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { deleteProviderKey, listProviderKeys, saveProviderKey } from '../../api/client';
 import { PageTransition } from '../../components/layout/PageTransition';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../hooks/useTheme';
-import type { ProviderConfig } from '../../types';
 
-// ─── Provider catalogue ───────────────────────────────────────────────────────
+// ─── Provider / model catalogue ───────────────────────────────────────────────
 
-const PROVIDERS: { id: string; label: string; keyLabel: string; useEndpoint?: boolean; color: string }[] = [
-  { id: 'anthropic',   label: 'Anthropic',   keyLabel: 'API Key',        color: '#818cf8' },
-  { id: 'openai',      label: 'OpenAI',      keyLabel: 'API Key',        color: '#34d399' },
-  { id: 'gemini',      label: 'Gemini',      keyLabel: 'API Key',        color: '#60a5fa' },
-  { id: 'groq',        label: 'Groq',        keyLabel: 'API Key',        color: '#f59e0b' },
-  { id: 'openrouter',  label: 'OpenRouter',  keyLabel: 'API Key',        color: '#f472b6' },
-  { id: 'ollama',      label: 'Ollama',      keyLabel: 'Endpoint URL',   useEndpoint: true, color: '#a78bfa' },
-];
+const PROVIDER_MODELS: Record<string, string[]> = {
+  Anthropic:  ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'],
+  OpenAI:     ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+  Groq:       ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  Ollama:     ['llama3.2', 'mistral', 'codellama'],
+  // Gemini backend not yet implemented — kept for display only
+};
 
-// ─── Provider row ─────────────────────────────────────────────────────────────
 
-function ProviderRow({
-  def,
-  saved,
-  onSaved,
-}: {
-  def: typeof PROVIDERS[number];
-  saved: ProviderConfig | undefined;
-  onSaved: () => void;
-}) {
-  const [value, setValue] = useState('');
-  const [show, setShow] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+const PROVIDER_IDS: Record<string, string> = {
+  Anthropic:  'anthropic',
+  OpenAI:     'openai',
+  Gemini:     'gemini',
+  Groq:       'groq',
+  Ollama:     'ollama',
+};
 
-  async function handleSave() {
-    if (!value.trim()) return;
-    setSaving(true);
-    try {
-      await saveProviderKey(
-        def.id,
-        def.useEndpoint ? undefined : value.trim(),
-        def.useEndpoint ? value.trim() : undefined,
-      );
-      setValue('');
-      onSaved();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      await deleteProviderKey(def.id);
-      onSaved();
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <div style={{
-      padding: '16px 20px',
-      borderBottom: '1px solid var(--c-border)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: saved?.has_key || saved?.endpoint ? 10 : 0 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-          background: def.color + '18', border: `1px solid ${def.color}30`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Key size={14} color={def.color} strokeWidth={1.75} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--c-text)' }}>{def.label}</span>
-            {(saved?.has_key || saved?.endpoint) && (
-              <span style={{
-                fontSize: '0.6rem', fontWeight: 700, padding: '1px 6px', borderRadius: 4, letterSpacing: '0.04em',
-                background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.25)', color: '#34d399',
-              }}>
-                CONFIGURED
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--c-text-3)', marginTop: 1 }}>
-            {def.useEndpoint ? (saved?.endpoint ? `Endpoint: ${saved.endpoint}` : 'No endpoint configured') : (saved?.has_key ? '••••••••••••••••••••' : 'No key saved')}
-          </div>
-        </div>
-        {(saved?.has_key || saved?.endpoint) && (
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              padding: '5px 10px', borderRadius: 7, cursor: deleting ? 'wait' : 'pointer',
-              background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)',
-              color: '#f87171', fontSize: '0.75rem', fontWeight: 500, fontFamily: 'var(--font)',
-              transition: 'all 0.15s ease', flexShrink: 0,
-            }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'rgba(239,68,68,0.12)'; el.style.borderColor = 'rgba(239,68,68,0.3)'; }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'rgba(239,68,68,0.06)'; el.style.borderColor = 'rgba(239,68,68,0.18)'; }}
-          >
-            <Trash2 size={12} />
-            {deleting ? 'Removing…' : 'Remove'}
-          </button>
-        )}
-      </div>
-
-      {/* Key / endpoint input */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <div style={{ flex: 1, position: 'relative' }}>
-          <input
-            type={show || def.useEndpoint ? 'text' : 'password'}
-            value={value}
-            onChange={e => setValue(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
-            placeholder={def.useEndpoint ? 'http://localhost:11434' : `Enter ${def.label} ${def.keyLabel}`}
-            style={{
-              width: '100%', padding: '8px 36px 8px 10px', borderRadius: 8, boxSizing: 'border-box',
-              background: 'var(--c-bg-2)', border: '1px solid var(--c-border)',
-              color: 'var(--c-text)', fontSize: '0.8125rem', outline: 'none',
-              fontFamily: 'var(--font)', transition: 'border-color 0.15s',
-            }}
-            onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-accent)'; }}
-            onBlur={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
-          />
-          {!def.useEndpoint && (
-            <button
-              type="button"
-              onClick={() => setShow(v => !v)}
-              style={{
-                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--c-text-3)', display: 'flex', padding: 2,
-              }}
-            >
-              {show ? <EyeOff size={13} /> : <Eye size={13} />}
-            </button>
-          )}
-        </div>
-        <button
-          onClick={handleSave}
-          disabled={saving || !value.trim()}
-          style={{
-            padding: '8px 14px', borderRadius: 8, cursor: saving || !value.trim() ? 'not-allowed' : 'pointer',
-            background: saving || !value.trim() ? 'var(--c-bg-2)' : 'var(--c-accent)',
-            border: `1px solid ${saving || !value.trim() ? 'var(--c-border)' : 'var(--c-accent)'}`,
-            color: saving || !value.trim() ? 'var(--c-text-3)' : 'white',
-            fontSize: '0.8125rem', fontWeight: 600, fontFamily: 'var(--font)', whiteSpace: 'nowrap',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-    </div>
-  );
-}
+const USE_ENDPOINT_PROVIDERS = new Set(['ollama']);
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -167,14 +34,66 @@ export default function SettingsPage() {
   const { isDark, toggle } = useTheme();
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const [providerKeys, setProviderKeys] = useState<ProviderConfig[]>([]);
+
+  const [selectedProvider, setSelectedProvider] = useState('Anthropic');
+  const [selectedModel, setSelectedModel] = useState(PROVIDER_MODELS['Anthropic'][0]);
+
+  const [keyValue, setKeyValue] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
+  const [savedEndpoint, setSavedEndpoint] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
-    listProviderKeys().then(setProviderKeys).catch(() => {});
-  }, []);
+    loadKeyForProvider(selectedProvider);
+  }, [selectedProvider]);
 
-  function refreshKeys() {
-    listProviderKeys().then(setProviderKeys).catch(() => {});
+  function handleProviderChange(provider: string) {
+    setSelectedProvider(provider);
+    setSelectedModel(PROVIDER_MODELS[provider]?.[0] ?? '');
+    setKeyValue('');
+    setShowKey(false);
+  }
+
+  async function loadKeyForProvider(provider: string) {
+    try {
+      const keys = await listProviderKeys();
+      const id = PROVIDER_IDS[provider];
+      const saved = keys.find(k => k.provider === id);
+      setHasKey(saved?.has_key ?? false);
+      setSavedEndpoint(saved?.endpoint ?? '');
+    } catch { /* ignore */ }
+  }
+
+  async function handleSave() {
+    if (!keyValue.trim()) return;
+    setSaving(true);
+    try {
+      const id = PROVIDER_IDS[selectedProvider];
+      const isEndpoint = USE_ENDPOINT_PROVIDERS.has(id);
+      await saveProviderKey(
+        id,
+        isEndpoint ? undefined : keyValue.trim(),
+        isEndpoint ? keyValue.trim() : undefined,
+        selectedModel,
+      );
+      setKeyValue('');
+      setHasKey(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    setRemoving(true);
+    try {
+      await deleteProviderKey(PROVIDER_IDS[selectedProvider]);
+      setHasKey(false);
+      setSavedEndpoint('');
+    } finally {
+      setRemoving(false);
+    }
   }
 
   function handleSignOut() {
@@ -182,9 +101,8 @@ export default function SettingsPage() {
     navigate('/signin', { replace: true });
   }
 
-  function savedKey(id: string) {
-    return providerKeys.find(k => k.provider === id);
-  }
+  const isEndpointProvider = USE_ENDPOINT_PROVIDERS.has(PROVIDER_IDS[selectedProvider]);
+  const isConfigured = isEndpointProvider ? !!savedEndpoint : hasKey;
 
   return (
     <PageTransition>
@@ -247,7 +165,7 @@ export default function SettingsPage() {
           </button>
         </motion.div>
 
-        {/* AI Providers */}
+        {/* AI Configuration */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -260,21 +178,176 @@ export default function SettingsPage() {
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 36, height: 36, borderRadius: 9,
-              background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
+              background: isConfigured ? 'rgba(16,185,129,0.1)' : 'rgba(99,102,241,0.1)',
+              border: `1px solid ${isConfigured ? 'rgba(16,185,129,0.2)' : 'rgba(99,102,241,0.2)'}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <Key size={17} color="var(--c-accent)" strokeWidth={1.75} />
+              {isConfigured
+                ? <Wifi size={17} color="#10b981" strokeWidth={1.75} />
+                : <WifiOff size={17} color="var(--c-text-3)" strokeWidth={1.75} />
+              }
             </div>
             <div>
-              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)' }}>AI Providers</div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)' }}>AI Configuration</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--c-text-3)', marginTop: 1 }}>
                 Keys are stored securely on the backend — never in the browser
               </div>
             </div>
           </div>
-          {PROVIDERS.map(def => (
-            <ProviderRow key={def.id} def={def} saved={savedKey(def.id)} onSaved={refreshKeys} />
-          ))}
+
+          <div style={{ padding: '20px' }}>
+            {/* Provider + Model selectors */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--c-text-2)', marginBottom: 6 }}>
+                  Provider
+                </label>
+                <select
+                  value={selectedProvider}
+                  onChange={e => handleProviderChange(e.target.value)}
+                  style={{
+                    width: '100%', padding: '8px 10px', borderRadius: 9,
+                    background: 'var(--c-bg-2)', border: '1px solid var(--c-border)',
+                    color: 'var(--c-text)', fontSize: '0.875rem', fontFamily: 'var(--font)',
+                    outline: 'none', cursor: 'pointer', appearance: 'auto',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-accent)'; }}
+                  onBlur={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
+                >
+                  {Object.keys(PROVIDER_MODELS).map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                  <option disabled value="gemini">Gemini (Coming Soon)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--c-text-2)', marginBottom: 6 }}>
+                  Model
+                </label>
+                <select
+                  value={selectedModel}
+                  onChange={e => setSelectedModel(e.target.value)}
+                  style={{
+                    width: '100%', padding: '8px 10px', borderRadius: 9,
+                    background: 'var(--c-bg-2)', border: '1px solid var(--c-border)',
+                    color: 'var(--c-text)', fontSize: '0.875rem', fontFamily: 'var(--font)',
+                    outline: 'none', cursor: 'pointer', appearance: 'auto',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-accent)'; }}
+                  onBlur={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
+                >
+                  {(PROVIDER_MODELS[selectedProvider] ?? []).map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* API Key / Endpoint input */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--c-text-2)', marginBottom: 6 }}>
+                {isEndpointProvider ? 'Endpoint URL' : 'API Key'}
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <input
+                    type={showKey || isEndpointProvider ? 'text' : 'password'}
+                    value={keyValue}
+                    onChange={e => setKeyValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
+                    placeholder={
+                      isEndpointProvider
+                        ? (savedEndpoint || 'http://localhost:11434')
+                        : (isConfigured ? '•'.repeat(20) : `Enter ${selectedProvider} API Key`)
+                    }
+                    style={{
+                      width: '100%', padding: '8px 36px 8px 10px', borderRadius: 9, boxSizing: 'border-box',
+                      background: 'var(--c-bg-2)', border: '1px solid var(--c-border)',
+                      color: 'var(--c-text)', fontSize: '0.875rem', outline: 'none',
+                      fontFamily: 'var(--font)', transition: 'border-color 0.15s',
+                    }}
+                    onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-accent)'; }}
+                    onBlur={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
+                  />
+                  {!isEndpointProvider && (
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(v => !v)}
+                      style={{
+                        position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--c-text-3)', display: 'flex', padding: 2,
+                      }}
+                    >
+                      {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !keyValue.trim()}
+                  style={{
+                    padding: '8px 14px', borderRadius: 9, cursor: saving || !keyValue.trim() ? 'not-allowed' : 'pointer',
+                    background: saving || !keyValue.trim() ? 'var(--c-bg-2)' : 'var(--c-accent)',
+                    border: `1px solid ${saving || !keyValue.trim() ? 'var(--c-border)' : 'var(--c-accent)'}`,
+                    color: saving || !keyValue.trim() ? 'var(--c-text-3)' : 'white',
+                    fontSize: '0.875rem', fontWeight: 600, fontFamily: 'var(--font)', whiteSpace: 'nowrap',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                {isConfigured && (
+                  <button
+                    onClick={handleRemove}
+                    disabled={removing}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '8px 10px', borderRadius: 9, cursor: removing ? 'wait' : 'pointer',
+                      background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)',
+                      color: '#f87171', fontFamily: 'var(--font)',
+                      transition: 'all 0.15s ease', flexShrink: 0,
+                    }}
+                    onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'rgba(239,68,68,0.12)'; el.style.borderColor = 'rgba(239,68,68,0.3)'; }}
+                    onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'rgba(239,68,68,0.06)'; el.style.borderColor = 'rgba(239,68,68,0.18)'; }}
+                    title="Remove key"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Connection status */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 14px', borderRadius: 9,
+              background: isConfigured ? 'rgba(16,185,129,0.06)' : 'rgba(148,163,184,0.05)',
+              border: `1px solid ${isConfigured ? 'rgba(16,185,129,0.18)' : 'rgba(148,163,184,0.12)'}`,
+            }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                background: isConfigured ? '#10b981' : 'var(--c-text-3)',
+              }} />
+              {isConfigured
+                ? <CheckCircle2 size={13} color="#10b981" strokeWidth={2} style={{ flexShrink: 0 }} />
+                : null
+              }
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: isConfigured ? '#10b981' : 'var(--c-text-3)' }}>
+                {isConfigured
+                  ? `Connected — ${selectedProvider} configured`
+                  : `Not configured — enter ${isEndpointProvider ? 'an endpoint' : 'an API key'} above`
+                }
+              </span>
+              {isConfigured && isEndpointProvider && savedEndpoint && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--c-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  · {savedEndpoint}
+                </span>
+              )}
+            </div>
+          </div>
         </motion.div>
 
         {/* Account */}

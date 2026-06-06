@@ -27,6 +27,10 @@ export interface TestCase {
   validation_status?: string;
   rag_sources?: string[];
   rag_top_score?: number;
+  // Review workflow
+  review_status?: "pending" | "approved" | "rejected" | "needs_revision";
+  review_note?: string;
+  reviewed_at?: string;
 }
 
 export interface UploadResult {
@@ -108,4 +112,10 @@ export interface ProviderConfig {
   provider: string;
   has_key: boolean;
   endpoint?: string;
+}
+
+export interface ActiveProvider {
+  provider: string;
+  model: string;
+  has_key: boolean;
 }

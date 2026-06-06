@@ -78,6 +78,10 @@ class TestCaseDB(Base):
     validation_status = Column(String(50), nullable=True)
     rag_sources = Column(JSON, nullable=True)
     rag_top_score = Column(Float, default=0.0)
+    # Review workflow
+    review_status = Column(String(20), nullable=True, default="pending")
+    review_note = Column(Text, nullable=True)
+    reviewed_at = Column(String(50), nullable=True)
 
 
 class ProviderKey(Base):
@@ -88,4 +92,13 @@ class ProviderKey(Base):
     api_key = Column(Text, nullable=True)
     endpoint = Column(String(500), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AppConfig(Base):
+    """Key-value store for application-level settings (e.g. active_provider, active_model)."""
+    __tablename__ = "app_config"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
