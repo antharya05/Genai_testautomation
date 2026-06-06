@@ -3,8 +3,15 @@ uvicorn[standard]
 python-multipart
 pymupdf
 python-docx
-python-pptx
 python-dotenv
 anthropic
 groq
 pydantic
+openpyxl
+# RAG dependencies
+chromadb
+sentence-transformers
+# Database
+sqlalchemy
+alembic
+psycopg2-binary

@@ -1,13 +1,72 @@
 import re
+import os
+import json
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+PARSE_PROMPT = """You are an expert requirements analyst for automotive software systems.
+
+Read the following document text and extract ALL software requirements.
+
+A requirement is any statement that describes:
+- What the system SHALL or MUST do
+- Functional behavior expected from the system
+- Performance, safety, or interface constraints
+- Numbered or labeled requirement statements (REQ_001, FR-001, etc.)
+
+Return ONLY a valid JSON array of strings. Each string is one complete requirement.
+No markdown, no explanation, no extra text.
+
+Example output:
+["The system shall monitor brake pressure every 10ms", "REQ_001: ECU shall respond within 50ms"]"""
 
 
 def parse_requirements(text: str) -> list[str]:
-    """
-    Detects requirement format automatically and splits into individual requirements.
-    Priority: structured IDs > numbered lists > SHALL statements > paragraph fallback.
-    """
+    try:
+        return _ai_parse(text)
+    except Exception:
+        return _regex_parse(text)
 
-    # 1. Structured ID patterns: REQ_001, FR-001, SRS_001, UC_001, SWR-001, etc.
+
+def _ai_parse(text: str) -> list[str]:
+    from groq import Groq
+
+    client = Groq(api_key=GROQ_API_KEY)
+
+    # Trim text to avoid token limits (keep first 6000 chars)
+    trimmed = text[:6000] if len(text) > 6000 else text
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": PARSE_PROMPT},
+            {"role": "user", "content": f"Extract requirements from this document:\n\n{trimmed}"}
+        ],
+        temperature=0.1,
+        max_tokens=2048,
+    )
+
+    content = response.choices[0].message.content.strip()
+
+    # Strip markdown code fences if present
+    if content.startswith("```"):
+        content = re.sub(r"^```\w*\n?", "", content)
+        content = re.sub(r"\n?```$", "", content)
+
+    requirements = json.loads(content)
+
+    if not isinstance(requirements, list) or len(requirements) == 0:
+        raise ValueError("AI returned empty or invalid requirements list")
+
+    return [r.strip() for r in requirements if isinstance(r, str) and len(r.strip()) > 10]
+
+
+def _regex_parse(text: str) -> list[str]:
+    # 1. Structured ID patterns: REQ_001, FR-001, SRS_001, etc.
     id_pattern = r"((?:REQ|FR|SRS|UC|SWR|HWR|SYS|TST|FUNC|INT|SYS)[-_]\d+[\w]*[^\n]*(?:\n(?!(?:REQ|FR|SRS|UC|SWR|HWR|SYS|TST|FUNC|INT|SYS)[-_]\d+)[^\n]*)*)"
     matches = re.findall(id_pattern, text, re.IGNORECASE)
     cleaned = [m.strip() for m in matches if len(m.strip()) > 10]
