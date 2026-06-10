@@ -10,11 +10,48 @@ import { useTheme } from '../../hooks/useTheme';
 // ─── Provider / model catalogue ───────────────────────────────────────────────
 
 const PROVIDER_MODELS: Record<string, string[]> = {
-  Anthropic:  ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'],
-  OpenAI:     ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
-  Groq:       ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
-  Ollama:     ['llama3.2', 'mistral', 'codellama'],
-  // Gemini backend not yet implemented — kept for display only
+  Anthropic: [
+    'claude-opus-4-8',
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5-20251001',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022',
+    'claude-3-opus-20240229',
+  ],
+  OpenAI: [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4-turbo',
+    'gpt-4',
+    'gpt-3.5-turbo',
+    'o1',
+    'o1-mini',
+  ],
+  Gemini: [
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+    'gemini-1.0-pro',
+  ],
+  Groq: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-70b-versatile',
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+    'gemma-7b-it',
+  ],
+  Ollama: [
+    'llama3.2',
+    'llama3.1',
+    'mistral',
+    'codellama',
+    'phi3',
+    'qwen2.5',
+  ],
 };
 
 
@@ -106,7 +143,7 @@ export default function SettingsPage() {
 
   return (
     <PageTransition>
-      <div style={{ padding: '36px 40px', maxWidth: 640 }}>
+      <div style={{ padding: '36px 40px', maxWidth: 680, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
           <div style={{
             width: 34, height: 34, borderRadius: 9,
@@ -218,7 +255,6 @@ export default function SettingsPage() {
                   {Object.keys(PROVIDER_MODELS).map(p => (
                     <option key={p} value={p}>{p}</option>
                   ))}
-                  <option disabled value="gemini">Gemini (Coming Soon)</option>
                 </select>
               </div>
               <div>

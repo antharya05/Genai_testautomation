@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, Zap } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -103,17 +103,16 @@ export default function SignInPage() {
         {/* Brand header */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <motion.div
-            initial={{ scale: 0.7, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-            style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 50, height: 50, borderRadius: 14, marginBottom: 16,
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-              boxShadow: '0 0 32px rgba(99,102,241,0.5)',
-            }}
+            style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}
           >
-            <Zap size={22} color="white" fill="white" />
+            <img
+              src="/logo-removebg-preview.png"
+              alt="GuJ Tech"
+              style={{ height: 52, width: 'auto', objectFit: 'contain', display: 'block' }}
+            />
           </motion.div>
           <h1 style={{ color: 'white', fontSize: '1.5rem', fontWeight: 700, letterSpacing: '-0.025em', margin: '0 0 4px' }}>
             Welcome back
@@ -139,10 +138,10 @@ export default function SignInPage() {
         >
           <span style={{
             width: 28, height: 28, borderRadius: 7,
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            overflow: 'hidden',
           }}>
-            <Zap size={13} color="white" fill="white" />
+            <img src="/logo-removebg-preview.png" alt="" style={{ width: 26, height: 26, objectFit: 'contain' }} />
           </span>
           <div style={{ textAlign: 'left' }}>
             <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'rgba(255,255,255,0.92)', letterSpacing: '-0.01em' }}>

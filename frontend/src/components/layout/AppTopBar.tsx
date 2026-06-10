@@ -184,25 +184,26 @@ export function AppTopBar({ sidebarWidth, isMobile, onMobileMenuOpen }: Props) {
 
       <div style={{ flex: 1 }} />
 
-      {/* Active model indicator */}
-      {activeProvider?.model && (
+      {/* AI provider / model indicator */}
+      {activeProvider !== null && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          padding: '4px 10px', borderRadius: 6,
+          padding: '4px 10px', borderRadius: 6, flexShrink: 0,
           background: activeProvider.has_key ? 'rgba(16,185,129,0.06)' : 'var(--c-surface)',
-          border: `1px solid ${activeProvider.has_key ? 'rgba(16,185,129,0.2)' : 'var(--c-border)'}`,
-          flexShrink: 0,
+          border: `1px solid ${activeProvider.has_key ? 'rgba(16,185,129,0.18)' : 'var(--c-border)'}`,
         }}>
           <span style={{
             width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
             background: activeProvider.has_key ? '#10b981' : 'var(--c-text-3)',
           }} />
           <span style={{
-            fontSize: '0.75rem', fontWeight: 500,
+            fontSize: '0.75rem', fontWeight: 500, whiteSpace: 'nowrap',
             color: activeProvider.has_key ? '#10b981' : 'var(--c-text-3)',
-            whiteSpace: 'nowrap',
           }}>
-            {formatModelName(activeProvider.model)}
+            {activeProvider.has_key && activeProvider.model
+              ? formatModelName(activeProvider.model)
+              : 'No AI Provider'
+            }
           </span>
         </div>
       )}

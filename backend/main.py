@@ -89,13 +89,9 @@ async def lifespan(app: FastAPI):
     logger.info("Database ready.")
 
     # ── 2. RAG pipeline ──────────────────────────────────────────
-    _rag_enabled = os.getenv("RAG_ENABLED", "true").strip().lower() not in ("false", "0", "no")
-    if _rag_enabled:
-        logger.info("Initializing RAG pipeline...")
-        await rag_pipeline.initialize()
-        logger.info("RAG pipeline ready. Server accepting requests.")
-    else:
-        logger.info("RAG disabled (RAG_ENABLED=false). Skipping pipeline init — server accepting requests.")
+    logger.info("Initializing RAG pipeline...")
+    await rag_pipeline.initialize()
+    logger.info("RAG pipeline ready. Server accepting requests.")
 
     yield
     logger.info("Server shutting down.")

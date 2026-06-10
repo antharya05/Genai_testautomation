@@ -1,14 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   FileText,
   FolderOpen,
   GitBranch,
   Loader2,
-  PlayCircle,
   Plus,
   Sparkles,
   X,
@@ -20,6 +19,8 @@ import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
 import type { Project, ProjectStats, Run, TestCase } from "../../types";
 
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
 function formatRelative(iso: string): string {
   try {
     const diff = Date.now() - new Date(iso).getTime();
@@ -30,88 +31,231 @@ function formatRelative(iso: string): string {
   } catch { return "—"; }
 }
 
-function formatDuration(start: string, end?: string): string {
-  try {
-    const ms = new Date(end ?? new Date().toISOString()).getTime() - new Date(start).getTime();
-    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-    return `${Math.round(ms / 60_000)}m`;
-  } catch { return "—"; }
-}
-
 function formatDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   } catch { return "—"; }
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  complete: "#10b981",
-  running: "#f59e0b",
-  error: "#f87171",
+// ─── Color palettes ───────────────────────────────────────────────────────────
+
+const ASIL_COLORS: Record<string, string> = {
+  D: "#ef4444", C: "#f97316", B: "#f59e0b", A: "#10b981", QM: "#4A587A",
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  functional: "#818cf8",
-  boundary: "#34d399",
-  negative: "#f87171",
-  fault_injection: "#fb923c",
-  timing: "#60a5fa",
-  safety: "#a78bfa",
-  recovery: "#4ade80",
-  stress: "#f472b6",
+  functional:     "#818CF8",
+  boundary:       "#a78bfa",
+  negative:       "#f87171",
+  fault_injection:"#f59e0b",
+  timing:         "#06b6d4",
+  safety:         "#10b981",
+  recovery:       "#34d399",
+  stress:         "#f472b6",
 };
 
-const ASIL_COLORS: Record<string, string> = {
-  QM: "#94a3b8", A: "#10b981", B: "#f59e0b", C: "#f97316", D: "#ef4444",
+const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
+  complete: { color: "#10b981", label: "Complete" },
+  running:  { color: "#f59e0b", label: "Running"  },
+  error:    { color: "#ef4444", label: "Failed"   },
 };
 
-function CoverageStrip({ run }: { run: Run }) {
-  const counts: [string, number][] = [
-    ["functional", run.functional_count ?? 0],
-    ["boundary", run.boundary_count ?? 0],
-    ["negative", run.negative_count ?? 0],
-    ["fault_injection", run.fault_injection_count ?? 0],
-    ["timing", run.timing_count ?? 0],
-    ["safety", run.safety_count ?? 0],
-    ["recovery", run.recovery_count ?? 0],
-  ].filter(([, n]) => (n as number) > 0) as [string, number][];
+// ─── SVG Donut Chart ──────────────────────────────────────────────────────────
 
-  const total = counts.reduce((s, [, n]) => s + n, 0);
-  if (total === 0) return null;
+interface DonutSeg { label: string; value: number; color: string }
+
+function DonutChart({
+  segments, centerText, centerSub, size = 120, strokeW = 13,
+}: {
+  segments: DonutSeg[];
+  centerText: string | number;
+  centerSub: string;
+  size?: number;
+  strokeW?: number;
+}) {
+  const cx = size / 2, cy = size / 2;
+  const r = size / 2 - strokeW;
+  const circ = 2 * Math.PI * r;
+  const total = segments.reduce((s, d) => s + d.value, 0);
+  const GAP = total > 1 ? 2 : 0;
+
+  let cumFrac = 0;
 
   return (
-    <div style={{ display: "flex", height: 4, borderRadius: 3, overflow: "hidden", gap: "1px", marginTop: 5 }}>
-      {counts.map(([type, count]) => (
-        <div
-          key={type}
-          title={`${type.replace(/_/g, " ")}: ${count}`}
-          style={{ flex: count, background: TYPE_COLORS[type] ?? "#818cf8", minWidth: 3 }}
-        />
+    <svg width={size} height={size} style={{ flexShrink: 0 }}>
+      {/* Track */}
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={strokeW} />
+      {/* Segments */}
+      {total > 0 && segments.map(seg => {
+        if (seg.value === 0) return null;
+        const frac = seg.value / total;
+        const startAngle = cumFrac * 360 - 90;
+        const dashLen = Math.max(0, frac * circ - GAP);
+        cumFrac += frac;
+        return (
+          <circle
+            key={seg.label}
+            cx={cx} cy={cy} r={r}
+            fill="none"
+            stroke={seg.color}
+            strokeWidth={strokeW - 1}
+            strokeDasharray={`${dashLen} ${circ}`}
+            strokeDashoffset={0}
+            transform={`rotate(${startAngle} ${cx} ${cy})`}
+            strokeLinecap="butt"
+          />
+        );
+      })}
+      {/* Center */}
+      <text x={cx} y={cy - 5} textAnchor="middle" fill="var(--c-text)"
+        fontSize="17" fontWeight="700" fontFamily="var(--font)">
+        {centerText}
+      </text>
+      <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--c-text-3)"
+        fontSize="9" fontFamily="var(--font)" letterSpacing="0.08em">
+        {centerSub.toUpperCase()}
+      </text>
+    </svg>
+  );
+}
+
+// ─── Chart Legend ─────────────────────────────────────────────────────────────
+
+function ChartLegend({ items }: { items: DonutSeg[] }) {
+  const total = items.reduce((s, d) => s + d.value, 0);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0 }}>
+      {items.map(seg => (
+        <div key={seg.label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: 2, flexShrink: 0,
+            background: seg.color,
+          }} />
+          <span style={{
+            flex: 1, fontSize: "0.75rem", color: "var(--c-text-2)",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            textTransform: "capitalize",
+          }}>
+            {seg.label.replace(/_/g, " ")}
+          </span>
+          <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)", fontFamily: "var(--font-mono)", flexShrink: 0 }}>
+            {seg.value}
+          </span>
+          {total > 0 && (
+            <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", minWidth: 32, textAlign: "right", flexShrink: 0 }}>
+              {Math.round((seg.value / total) * 100)}%
+            </span>
+          )}
+        </div>
       ))}
     </div>
   );
 }
 
-function AsilDots({ testCases }: { testCases: TestCase[] }) {
-  const counts: Record<string, number> = {};
-  testCases.forEach(tc => { counts[tc.asil] = (counts[tc.asil] ?? 0) + 1; });
-  const entries = Object.entries(counts).filter(([, n]) => n > 0)
-    .sort((a, b) => ["QM", "A", "B", "C", "D"].indexOf(b[0]) - ["QM", "A", "B", "C", "D"].indexOf(a[0]));
-  if (entries.length === 0) return null;
+// ─── KPI Card ─────────────────────────────────────────────────────────────────
 
+function KpiCard({
+  label, value, icon: Icon, color, loading, suffix,
+}: {
+  label: string;
+  value: number | string | null;
+  icon: typeof Sparkles;
+  color: string;
+  loading?: boolean;
+  suffix?: string;
+}) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-      {entries.map(([asil, count]) => (
-        <span key={asil} style={{
-          fontSize: "0.6rem", fontWeight: 700, padding: "1px 5px", borderRadius: 4,
-          background: (ASIL_COLORS[asil] ?? "#94a3b8") + "18",
-          color: ASIL_COLORS[asil] ?? "#94a3b8",
-          border: `1px solid ${(ASIL_COLORS[asil] ?? "#94a3b8")}30`,
-          letterSpacing: "0.02em",
+    <div style={{
+      background: "var(--c-surface)", border: "1px solid var(--c-border)",
+      borderRadius: 12, padding: "16px 18px",
+      display: "flex", alignItems: "center", gap: 14,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+        background: color + "14",
+        border: `1px solid ${color}22`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <Icon size={16} color={color} strokeWidth={1.75} />
+      </div>
+      <div>
+        <div style={{
+          fontSize: "1.5rem", fontWeight: 800, color: "var(--c-text)",
+          lineHeight: 1, letterSpacing: "-0.035em",
+          display: "flex", alignItems: "baseline", gap: 3,
         }}>
-          {asil}-{count}
+          {loading
+            ? <Loader2 size={14} color="var(--c-text-3)" style={{ animation: "spin 1s linear infinite" }} />
+            : <>{(value ?? 0).toLocaleString()}{suffix && <span style={{ fontSize: "0.875rem", fontWeight: 600, color: color }}>{suffix}</span>}</>
+          }
+        </div>
+        <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginTop: 3, fontWeight: 500 }}>
+          {label}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section Card ──────────────────────────────────────────────────────────────
+
+function SectionCard({
+  title, action, children,
+}: {
+  title: string;
+  action?: { label: string; to: string };
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{
+      background: "var(--c-surface)", border: "1px solid var(--c-border)",
+      borderRadius: 12, overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "13px 18px", borderBottom: "1px solid var(--c-border)",
+      }}>
+        <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)" }}>
+          {title}
         </span>
-      ))}
+        {action && (
+          <Link to={action.to} style={{
+            fontSize: "0.75rem", color: "var(--c-accent)",
+            fontWeight: 500, textDecoration: "none",
+          }}>
+            {action.label}
+          </Link>
+        )}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+// ─── Progress Bar ──────────────────────────────────────────────────────────────
+
+function ProgressRow({ label, value, max, color }: {
+  label: string; value: number; max: number; color: string;
+}) {
+  const pct = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: "0.75rem", color: "var(--c-text-2)", textTransform: "capitalize" }}>
+          {label.replace(/_/g, " ")}
+        </span>
+        <span style={{ fontSize: "0.75rem", color, fontFamily: "var(--font-mono)", fontWeight: 600 }}>
+          {value}
+        </span>
+      </div>
+      <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          style={{ height: "100%", borderRadius: 2, background: color }}
+        />
+      </div>
     </div>
   );
 }
@@ -119,8 +263,7 @@ function AsilDots({ testCases }: { testCases: TestCase[] }) {
 // ─── New Project Modal ────────────────────────────────────────────────────────
 
 function NewProjectModal({
-  onClose,
-  onCreated,
+  onClose, onCreated,
 }: {
   onClose: () => void;
   onCreated: (p: Project) => void;
@@ -151,144 +294,67 @@ function NewProjectModal({
   return (
     <>
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose}
-        style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
-          zIndex: 200, backdropFilter: "blur(4px)",
-        }}
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, backdropFilter: "blur(4px)" }}
       />
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: -12 }}
+        initial={{ opacity: 0, scale: 0.96, y: -10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: -12 }}
+        exit={{ opacity: 0, scale: 0.96, y: -10 }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        style={{
-          position: "fixed", top: "50%", left: "50%",
-          transform: "translate(-50%, -50%)",
-          zIndex: 201, width: "100%", maxWidth: 440,
-          padding: "0 20px",
-        }}
+        style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 201, width: "100%", maxWidth: 440, padding: "0 20px" }}
       >
-        <div style={{
-          background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-          borderRadius: 16, overflow: "hidden",
-          boxShadow: "0 24px 72px rgba(0,0,0,0.4)",
-        }}>
-          <div style={{
-            padding: "16px 20px", borderBottom: "1px solid var(--c-border)",
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-          }}>
+        <div style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", borderRadius: 14, overflow: "hidden", boxShadow: "0 24px 72px rgba(0,0,0,0.45)" }}>
+          <div style={{ padding: "15px 18px", borderBottom: "1px solid var(--c-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <FolderOpen size={15} color="var(--c-accent)" strokeWidth={1.75} />
+              <div style={{ width: 30, height: 30, borderRadius: 7, background: "var(--c-accent-dim)", border: "1px solid var(--c-accent-glow)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <FolderOpen size={14} color="var(--c-accent)" strokeWidth={1.75} />
               </div>
-              <span style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--c-text)" }}>
-                New Project
-              </span>
+              <span style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--c-text)" }}>New Project</span>
             </div>
-            <button
-              onClick={onClose}
-              style={{
-                background: "none", border: "none", cursor: "pointer",
-                color: "var(--c-text-3)", display: "flex", padding: 4, borderRadius: 6,
-              }}
-            >
-              <X size={16} />
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--c-text-3)", display: "flex", padding: 4, borderRadius: 5 }}>
+              <X size={15} />
             </button>
           </div>
-
-          <form onSubmit={handleCreate} style={{ padding: "20px" }}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 500, color: "var(--c-text-2)", marginBottom: 6 }}>
+          <form onSubmit={handleCreate} style={{ padding: "18px" }}>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 500, color: "var(--c-text-2)", marginBottom: 5 }}>
                 Project Name <span style={{ color: "var(--c-accent)" }}>*</span>
               </label>
               <input
-                ref={nameRef}
-                type="text"
-                value={name}
+                ref={nameRef} type="text" value={name}
                 onChange={e => { setName(e.target.value); setError(""); }}
                 placeholder="e.g. AEB Safety Validation"
-                style={{
-                  width: "100%", padding: "9px 12px", borderRadius: 9, boxSizing: "border-box",
-                  background: "var(--c-bg)", border: "1px solid var(--c-border)",
-                  color: "var(--c-text)", fontSize: "0.875rem", outline: "none",
-                  fontFamily: "var(--font)", transition: "border-color 0.15s",
-                }}
+                style={{ width: "100%", padding: "8px 11px", borderRadius: 8, boxSizing: "border-box", background: "var(--c-bg)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontSize: "0.875rem", outline: "none", fontFamily: "var(--font)", transition: "border-color 0.15s" }}
                 onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-accent)"; }}
                 onBlur={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border)"; }}
               />
             </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 500, color: "var(--c-text-2)", marginBottom: 6 }}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 500, color: "var(--c-text-2)", marginBottom: 5 }}>
                 Description <span style={{ color: "var(--c-text-3)", fontWeight: 400 }}>(optional)</span>
               </label>
               <textarea
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                placeholder="Brief description of this project's scope and objectives"
-                rows={3}
-                style={{
-                  width: "100%", padding: "9px 12px", borderRadius: 9, boxSizing: "border-box",
-                  background: "var(--c-bg)", border: "1px solid var(--c-border)",
-                  color: "var(--c-text)", fontSize: "0.875rem", outline: "none",
-                  fontFamily: "var(--font)", resize: "vertical", minHeight: 72,
-                  transition: "border-color 0.15s",
-                }}
+                value={description} onChange={e => setDescription(e.target.value)}
+                placeholder="Scope and objectives for this project"
+                rows={2}
+                style={{ width: "100%", padding: "8px 11px", borderRadius: 8, boxSizing: "border-box", background: "var(--c-bg)", border: "1px solid var(--c-border)", color: "var(--c-text)", fontSize: "0.875rem", outline: "none", fontFamily: "var(--font)", resize: "vertical", minHeight: 60, transition: "border-color 0.15s" }}
                 onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-accent)"; }}
                 onBlur={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border)"; }}
               />
             </div>
-
             {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{
-                  padding: "8px 12px", borderRadius: 8, marginBottom: 14,
-                  background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.22)",
-                  fontSize: "0.8125rem", color: "#fca5a5",
-                }}
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ padding: "7px 11px", borderRadius: 7, marginBottom: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: "0.8rem", color: "#fca5a5" }}>
                 {error}
               </motion.div>
             )}
-
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                onClick={onClose}
-                style={{
-                  padding: "8px 16px", borderRadius: 8, cursor: "pointer",
-                  background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-                  color: "var(--c-text-2)", fontSize: "0.875rem", fontWeight: 500,
-                  fontFamily: "var(--font)",
-                }}
-              >
+              <button type="button" onClick={onClose} style={{ padding: "7px 14px", borderRadius: 7, cursor: "pointer", background: "transparent", border: "1px solid var(--c-border)", color: "var(--c-text-2)", fontSize: "0.875rem", fontFamily: "var(--font)" }}>
                 Cancel
               </button>
-              <button
-                type="submit"
-                disabled={saving || !name.trim()}
-                style={{
-                  padding: "8px 18px", borderRadius: 8,
-                  cursor: saving || !name.trim() ? "not-allowed" : "pointer",
-                  background: saving || !name.trim() ? "var(--c-bg-2)" : "var(--c-accent)",
-                  border: `1px solid ${saving || !name.trim() ? "var(--c-border)" : "var(--c-accent)"}`,
-                  color: saving || !name.trim() ? "var(--c-text-3)" : "white",
-                  fontSize: "0.875rem", fontWeight: 600, fontFamily: "var(--font)",
-                  display: "flex", alignItems: "center", gap: 6,
-                  transition: "all 0.15s",
-                }}
-              >
-                {saving ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Plus size={13} />}
+              <button type="submit" disabled={saving || !name.trim()} style={{ padding: "7px 16px", borderRadius: 7, cursor: saving || !name.trim() ? "not-allowed" : "pointer", background: saving || !name.trim() ? "var(--c-surface-2)" : "var(--c-accent)", border: "none", color: saving || !name.trim() ? "var(--c-text-3)" : "white", fontSize: "0.875rem", fontWeight: 600, fontFamily: "var(--font)", display: "flex", alignItems: "center", gap: 5 }}>
+                {saving ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Plus size={12} />}
                 {saving ? "Creating…" : "Create Project"}
               </button>
             </div>
@@ -299,90 +365,50 @@ function NewProjectModal({
   );
 }
 
-// ─── Activity Feed ────────────────────────────────────────────────────────────
+// ─── Empty State ──────────────────────────────────────────────────────────────
 
-interface ActivityItem {
-  id: string;
-  icon: "sparkles" | "check" | "folder" | "error";
-  label: string;
-  time: string;
+function EmptyState({ icon: Icon, title, description, action }: {
+  icon: typeof FolderOpen;
+  title: string;
+  description: string;
+  action?: { label: string; to?: string; onClick?: () => void };
+}) {
+  return (
+    <div style={{ padding: "32px 24px", textAlign: "center" }}>
+      <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid var(--c-border)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+        <Icon size={18} color="var(--c-text-3)" strokeWidth={1.5} />
+      </div>
+      <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text-2)", marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: "0.8rem", color: "var(--c-text-3)", marginBottom: action ? 14 : 0, lineHeight: 1.55 }}>{description}</div>
+      {action && (
+        action.to
+          ? <Link to={action.to} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 13px", borderRadius: 7, background: "var(--c-accent-dim)", border: "1px solid var(--c-accent-glow)", color: "var(--c-accent)", textDecoration: "none", fontSize: "0.8rem", fontWeight: 600 }}>
+              {action.label}
+            </Link>
+          : <button onClick={action.onClick} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 13px", borderRadius: 7, background: "var(--c-accent-dim)", border: "1px solid var(--c-accent-glow)", color: "var(--c-accent)", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, fontFamily: "var(--font)" }}>
+              {action.label}
+            </button>
+      )}
+    </div>
+  );
 }
-
-function buildActivityFeed(runs: Run[], projects: Project[]): ActivityItem[] {
-  const items: ActivityItem[] = [];
-
-  runs.slice(0, 5).forEach(run => {
-    if (run.status === "complete") {
-      items.push({
-        id: `run-${run.id}`,
-        icon: "sparkles",
-        label: `Generated ${run.test_case_count} test cases from ${run.requirement_count} requirements`,
-        time: formatRelative(run.created_at),
-      });
-    } else if (run.status === "error") {
-      items.push({
-        id: `run-err-${run.id}`,
-        icon: "error",
-        label: `Generation failed (${run.requirement_count} requirements)`,
-        time: formatRelative(run.created_at),
-      });
-    }
-  });
-
-  projects.slice(0, 3).forEach(p => {
-    items.push({
-      id: `proj-${p.id}`,
-      icon: "folder",
-      label: `Project "${p.name}" created`,
-      time: formatRelative(p.created_at),
-    });
-  });
-
-  items.sort((a, b) => {
-    const timeScore = (t: string) => {
-      if (t === "just now") return 0;
-      const m = t.match(/^(\d+)(m|h|d)/);
-      if (!m) return 99999;
-      const n = parseInt(m[1]);
-      if (m[2] === "m") return n;
-      if (m[2] === "h") return n * 60;
-      return n * 1440;
-    };
-    return timeScore(a.time) - timeScore(b.time);
-  });
-
-  return items.slice(0, 6);
-}
-
-const ACTIVITY_ICONS: Record<ActivityItem["icon"], { icon: typeof Sparkles; color: string }> = {
-  sparkles: { icon: Sparkles, color: "#818cf8" },
-  check:    { icon: CheckCircle2, color: "#10b981" },
-  folder:   { icon: FolderOpen, color: "#60a5fa" },
-  error:    { icon: AlertTriangle, color: "#f87171" },
-};
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { projects: contextProjects, selectedProject, refreshProjects } = useProject();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const { projects, selectedProject, refreshProjects } = useProject();
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
-  const [coverageData, setCoverageData] = useState<[string, number][] | null>(null);
-  const [lastRunTotalCases, setLastRunTotalCases] = useState(0);
-  const [runCasesMap, setRunCasesMap] = useState<Record<string, TestCase[]>>({});
+  const [lastRunCases, setLastRunCases] = useState<TestCase[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [showNewProject, setShowNewProject] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handler);
+    window.addEventListener("resize", handler, { passive: true });
     return () => window.removeEventListener("resize", handler);
   }, []);
-
-  // Mirror context projects so we can append locally created ones
-  useEffect(() => { setProjects(contextProjects); }, [contextProjects]);
 
   async function loadAll() {
     if (!selectedProject) { setLoading(false); return; }
@@ -393,17 +419,12 @@ export default function DashboardPage() {
       ]);
       setStats(s);
       setRuns(r);
-
       const lastCompleted = r.find(run => run.status === "complete");
       if (lastCompleted) {
         try {
           const tcs = await getRunTestCases(lastCompleted.id);
-          const counts: Record<string, number> = {};
-          tcs.forEach(tc => { counts[tc.test_type] = (counts[tc.test_type] ?? 0) + 1; });
-          setCoverageData(Object.entries(counts).sort((a, b) => b[1] - a[1]));
-          setLastRunTotalCases(tcs.length);
-          setRunCasesMap(prev => ({ ...prev, [lastCompleted.id]: tcs }));
-        } catch { /* no coverage */ }
+          setLastRunCases(tcs);
+        } catch { /* no test cases */ }
       }
     } catch { /* backend offline */ } finally {
       setLoading(false);
@@ -412,11 +433,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setStats(null);
-    setRuns([]);
-    setCoverageData(null);
-    setRunCasesMap({});
+    setLoading(true); setStats(null); setRuns([]); setLastRunCases(null);
     loadAll().then(() => { if (cancelled) return; });
     return () => { cancelled = true; };
   }, [selectedProject]);
@@ -426,594 +443,327 @@ export default function DashboardPage() {
     await refreshProjects();
   }
 
-  // Derived validation/risk data from runs
-  const completedRuns = runs.filter(r => r.status === "complete");
-  const totalCasesAcrossRuns = completedRuns.reduce((s, r) => s + r.test_case_count, 0);
-  const safetyCount = completedRuns.reduce((s, r) => s + (r.safety_count ?? 0) + (r.fault_injection_count ?? 0), 0);
-  const highRiskCount = safetyCount;
-  const mediumRiskCount = completedRuns.reduce((s, r) => s + (r.negative_count ?? 0) + (r.boundary_count ?? 0), 0);
-  const lowRiskCount = completedRuns.reduce((s, r) => s + (r.functional_count ?? 0) + (r.timing_count ?? 0) + (r.recovery_count ?? 0), 0);
-  const activityFeed = buildActivityFeed(runs, projects);
+  // ── Derived analytics ────────────────────────────────────────────────────────
 
-  // Review stats from the most recent completed run's test cases
-  const lastRunCases = completedRuns.length > 0 ? (runCasesMap[completedRuns[0].id] ?? null) : null;
+  const completedRuns = runs.filter(r => r.status === "complete");
+
+  // ASIL distribution from last run's test cases
+  const asilSegments: DonutSeg[] = lastRunCases
+    ? (["D", "C", "B", "A", "QM"] as const)
+        .map(level => ({
+          label: `ASIL-${level}`,
+          value: lastRunCases.filter(tc => tc.asil === level).length,
+          color: ASIL_COLORS[level],
+        }))
+        .filter(s => s.value > 0)
+    : [];
+
+  // Test type distribution from last completed run's counts
+  const lastCompleted = completedRuns[0] ?? null;
+  const typeSegments: DonutSeg[] = lastCompleted
+    ? (Object.entries({
+        functional:     lastCompleted.functional_count ?? 0,
+        boundary:       lastCompleted.boundary_count ?? 0,
+        negative:       lastCompleted.negative_count ?? 0,
+        timing:         lastCompleted.timing_count ?? 0,
+        fault_injection:lastCompleted.fault_injection_count ?? 0,
+        safety:         lastCompleted.safety_count ?? 0,
+        recovery:       lastCompleted.recovery_count ?? 0,
+      }) as [string, number][])
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => ({ label: k, value: v, color: TYPE_COLORS[k] ?? "#818CF8" }))
+    : [];
+
+  // Review summary from last run's test cases
   const reviewApproved = lastRunCases ? lastRunCases.filter(tc => tc.review_status === "approved").length : 0;
-  const reviewPending = lastRunCases ? lastRunCases.filter(tc => !tc.review_status || tc.review_status === "pending").length : 0;
+  const reviewPending  = lastRunCases ? lastRunCases.filter(tc => !tc.review_status || tc.review_status === "pending").length : 0;
   const reviewRejected = lastRunCases ? lastRunCases.filter(tc => tc.review_status === "rejected").length : 0;
+  const reviewTotal    = reviewApproved + reviewPending + reviewRejected;
+
+  // Approximate requirement coverage: reqs touched across completed runs vs stats
+  const coveredReqs = completedRuns.reduce((s, r) => Math.max(s, r.requirement_count), 0);
+  const totalReqs   = stats?.total_requirements ?? 0;
+  const coveragePct = totalReqs > 0 ? Math.min(100, Math.round((coveredReqs / totalReqs) * 100)) : null;
+
+  // Validation issues: error runs + rejected test cases
+  const errorRuns    = runs.filter(r => r.status === "error").length;
+  const issueCount   = errorRuns + reviewRejected;
+
+  const hasData = !loading && selectedProject !== null;
+
+  // Two-column grid for charts
+  const col2 = isMobile ? "1fr" : "1fr 1fr";
 
   return (
     <PageTransition>
-      <div style={{ padding: "28px 32px 48px", maxWidth: 1200 }}>
+      <div style={{ padding: "24px 28px 48px", maxWidth: 1280 }}>
 
-        {/* ── Header ──────────────────────────────────────────── */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+        {/* ── Header ────────────────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 22, flexWrap: "wrap", gap: 10 }}>
           <div>
-            <h1 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--c-text)", letterSpacing: "-0.02em", margin: 0 }}>
-              Dashboard
+            <h1 style={{ fontSize: "1.125rem", fontWeight: 700, color: "var(--c-text)", letterSpacing: "-0.02em", margin: 0 }}>
+              Analytics Dashboard
             </h1>
-            <p style={{ color: "var(--c-text-3)", fontSize: "0.8125rem", margin: "3px 0 0" }}>
-              Activity overview for your workspace
+            <p style={{ color: "var(--c-text-3)", fontSize: "0.8rem", margin: "3px 0 0" }}>
+              {selectedProject ? selectedProject.name : "Select a project from the top bar"}
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={() => setShowNewProject(true)}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "8px 14px", borderRadius: 8,
-                background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-                color: "var(--c-text-2)", cursor: "pointer",
-                fontSize: "0.8125rem", fontWeight: 600, fontFamily: "var(--font)",
-                transition: "all 0.15s",
-              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 13px", borderRadius: 7, background: "var(--c-surface)", border: "1px solid var(--c-border)", color: "var(--c-text-2)", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, fontFamily: "var(--font)", transition: "all 0.15s" }}
               onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = "var(--c-border-2)"; el.style.color = "var(--c-text)"; }}
               onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = "var(--c-border)"; el.style.color = "var(--c-text-2)"; }}
             >
-              <Plus size={13} />
-              New Project
+              <Plus size={12} /> New Project
             </button>
-            <Link
-              to="/app/generate"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "8px 16px", borderRadius: 8,
-                background: "var(--c-accent)", color: "white",
-                textDecoration: "none", fontSize: "0.8125rem", fontWeight: 600,
-                boxShadow: "0 0 14px rgba(99,102,241,0.3)",
-              }}
-            >
-              <Sparkles size={13} />
-              New Run
+            <Link to="/app/generate" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 7, background: "var(--c-accent)", color: "white", textDecoration: "none", fontSize: "0.8rem", fontWeight: 600 }}>
+              <Sparkles size={12} /> New Run
             </Link>
           </div>
         </div>
 
-        {/* ── KPI strip ────────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
-          {[
-            { label: "Total Runs", value: stats?.total_runs, icon: GitBranch, color: "#60a5fa" },
-            { label: "Completed", value: stats?.completed_runs, icon: CheckCircle2, color: "#10b981" },
-            { label: "Test Cases", value: stats?.total_test_cases, icon: Sparkles, color: "#818cf8" },
-            { label: "Requirements", value: stats?.total_requirements, icon: FileText, color: "#34d399" },
-          ].map((item, i) => (
+        {/* ── KPI Strip ─────────────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(5,1fr)", gap: 10, marginBottom: 16 }}>
+          {(
+            [
+              { label: "Requirements",    value: stats?.total_requirements, icon: FileText,      color: "#34d399" },
+              { label: "Test Cases",      value: stats?.total_test_cases,   icon: Sparkles,      color: "#a78bfa" },
+              { label: "Total Runs",      value: stats?.total_runs,         icon: GitBranch,     color: "#60a5fa" },
+              { label: "Coverage",        value: coveragePct,               icon: CheckCircle2,  color: "#10b981", suffix: coveragePct !== null ? "%" : undefined },
+              { label: "Open Issues",     value: issueCount,                icon: AlertTriangle, color: issueCount > 0 ? "#f59e0b" : "#4A587A" },
+            ] as { label: string; value: number | null; icon: typeof Sparkles; color: string; suffix?: string }[]
+          ).map((item, i) => (
             <motion.div
               key={item.label}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              style={{
-                background: "var(--c-surface)", border: "1px solid var(--c-border)",
-                borderRadius: 12, padding: "14px 18px",
-                display: "flex", alignItems: "center", gap: 12,
-              }}
+              transition={{ delay: i * 0.04 }}
             >
-              <div style={{
-                width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                background: item.color + "15",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <item.icon size={15} color={item.color} strokeWidth={1.75} />
-              </div>
-              <div>
-                <div style={{ fontSize: "1.375rem", fontWeight: 800, color: "var(--c-text)", lineHeight: 1, letterSpacing: "-0.03em" }}>
-                  {loading
-                    ? <Loader2 size={14} color="var(--c-text-3)" style={{ animation: "spin 1s linear infinite" }} />
-                    : (item.value ?? 0).toLocaleString()
-                  }
-                </div>
-                <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginTop: 3, fontWeight: 500 }}>
-                  {item.label}
-                </div>
-              </div>
+              <KpiCard
+                label={item.label}
+                value={item.value}
+                icon={item.icon}
+                color={item.color}
+                loading={loading}
+                suffix={item.suffix}
+              />
             </motion.div>
           ))}
         </div>
 
-        {/* ── Project cards ─────────────────────────────────────── */}
-        {!loading && projects.length === 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            style={{
-              background: "var(--c-surface)", border: "1px dashed var(--c-border)",
-              borderRadius: 14, padding: "28px 24px", marginBottom: 14,
-              textAlign: "center",
-            }}
-          >
-            <FolderOpen size={22} color="var(--c-text-3)" style={{ marginBottom: 10 }} />
-            <p style={{ color: "var(--c-text-3)", fontSize: "0.875rem", margin: "0 0 14px" }}>
-              No projects yet. Create one to get started.
-            </p>
-            <button
-              onClick={() => setShowNewProject(true)}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "7px 14px", borderRadius: 7,
-                background: "var(--c-accent-dim)", border: "1px solid var(--c-accent-glow)",
-                color: "var(--c-accent)", cursor: "pointer",
-                fontSize: "0.8125rem", fontWeight: 600, fontFamily: "var(--font)",
-              }}
-            >
-              <Plus size={13} />
-              Create Project
-            </button>
-          </motion.div>
-        )}
+        {/* ── Charts Row ────────────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: col2, gap: 12, marginBottom: 12 }}>
 
-        {!loading && projects.length > 0 && (
-          <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-            {projects.slice(0, 3).map((project, i) => (
-              <motion.div
-                key={project.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 + i * 0.05 }}
-                style={{
-                  background: "var(--c-surface)", border: "1px solid var(--c-border)",
-                  borderRadius: 14, padding: "14px 20px",
-                  display: "flex", alignItems: "center", gap: 14,
-                }}
-              >
-                <div style={{
-                  width: 38, height: 38, borderRadius: 9, flexShrink: 0,
-                  background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <FolderOpen size={16} color="var(--c-accent)" strokeWidth={1.75} />
+          {/* ASIL Distribution */}
+          <SectionCard title="ASIL Distribution">
+            <div style={{ padding: "16px 18px" }}>
+              {!hasData ? (
+                <EmptyState icon={GitBranch} title="No data yet" description="Complete a generation run to see ASIL distribution." />
+              ) : asilSegments.length === 0 ? (
+                <EmptyState icon={GitBranch} title="No ASIL data" description="Run a generation to see ASIL classification." />
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                  <DonutChart
+                    segments={asilSegments}
+                    centerText={lastRunCases?.length ?? 0}
+                    centerSub="Test Cases"
+                    size={120}
+                    strokeW={13}
+                  />
+                  <ChartLegend items={asilSegments} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--c-text)", letterSpacing: "-0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {project.name}
-                    </span>
-                    {i === 0 && (
-                      <span style={{
-                        fontSize: "0.6rem", fontWeight: 700, padding: "1px 5px", borderRadius: 4, flexShrink: 0,
-                        background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.25)",
-                        color: "#10b981", letterSpacing: "0.04em",
-                      }}>
-                        ACTIVE
+              )}
+            </div>
+          </SectionCard>
+
+          {/* Test Type Distribution */}
+          <SectionCard title="Test Type Distribution">
+            <div style={{ padding: "16px 18px" }}>
+              {!hasData ? (
+                <EmptyState icon={Sparkles} title="No data yet" description="Complete a generation run to see test type breakdown." />
+              ) : typeSegments.length === 0 ? (
+                <EmptyState icon={Sparkles} title="No run data" description="Run a generation to see test type breakdown." />
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                  <DonutChart
+                    segments={typeSegments}
+                    centerText={typeSegments.reduce((s, d) => s + d.value, 0)}
+                    centerSub="Total"
+                    size={120}
+                    strokeW={13}
+                  />
+                  <ChartLegend items={typeSegments} />
+                </div>
+              )}
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── Second Row ────────────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: col2, gap: 12, marginBottom: 12 }}>
+
+          {/* Requirement Coverage */}
+          <SectionCard title="Requirement Coverage">
+            <div style={{ padding: "16px 18px" }}>
+              {!hasData || totalReqs === 0 ? (
+                <EmptyState icon={CheckCircle2} title="No requirements" description="Upload requirements and run a generation to see coverage." />
+              ) : (
+                <>
+                  <ProgressRow label="Covered" value={coveredReqs} max={totalReqs} color="#10b981" />
+                  <ProgressRow label="Total Requirements" value={totalReqs} max={totalReqs} color="#4A587A" />
+                  <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 8, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "0.8rem", color: "var(--c-text-2)" }}>Coverage Rate</span>
+                      <span style={{ fontSize: "1.25rem", fontWeight: 800, color: "#10b981", letterSpacing: "-0.03em" }}>
+                        {coveragePct ?? "—"}{coveragePct !== null ? "%" : ""}
                       </span>
+                    </div>
+                    {completedRuns.length > 0 && (
+                      <div style={{ fontSize: "0.7rem", color: "var(--c-text-3)", marginTop: 3 }}>
+                        Based on {completedRuns.length} completed run{completedRuns.length !== 1 ? "s" : ""}
+                      </div>
                     )}
                   </div>
-                  <div style={{ fontSize: "0.72rem", color: "var(--c-text-3)", marginTop: 2 }}>
-                    {i === 0 && stats
-                      ? `${stats.total_runs} run${stats.total_runs !== 1 ? "s" : ""} · ${stats.total_test_cases.toLocaleString()} test cases`
-                      : project.description || "No runs yet"
-                    }
-                  </div>
-                </div>
-                {i === 0 && (
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <Link
-                      to="/app/generate"
-                      style={{
-                        display: "inline-flex", alignItems: "center", gap: 5,
-                        padding: "5px 10px", borderRadius: 7, fontSize: "0.75rem", fontWeight: 600,
-                        background: "var(--c-accent-dim)", border: "1px solid var(--c-accent-glow)",
-                        color: "var(--c-accent)", textDecoration: "none",
-                      }}
-                    >
-                      <Sparkles size={11} />
-                      New Run
-                    </Link>
-                    <Link
-                      to="/app/runs"
-                      style={{
-                        display: "inline-flex", alignItems: "center", gap: 5,
-                        padding: "5px 10px", borderRadius: 7, fontSize: "0.75rem", fontWeight: 500,
-                        background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-                        color: "var(--c-text-2)", textDecoration: "none",
-                      }}
-                    >
-                      History
-                    </Link>
-                  </div>
-                )}
-              </motion.div>
-            ))}
-            {projects.length > 3 && (
-              <div style={{ fontSize: "0.75rem", color: "var(--c-text-3)", padding: "4px 8px" }}>
-                +{projects.length - 3} more project{projects.length - 3 !== 1 ? "s" : ""}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Main grid ────────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 264px", gap: 14 }}>
-
-          {/* Recent runs */}
-          <div>
-            <div style={{
-              background: "var(--c-surface)", border: "1px solid var(--c-border)",
-              borderRadius: 14, overflow: "hidden", marginBottom: 14,
-            }}>
-              <div style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "14px 20px", borderBottom: "1px solid var(--c-border)",
-              }}>
-                <h3 style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--c-text)", margin: 0 }}>
-                  Recent Runs
-                </h3>
-                <Link to="/app/runs" style={{ color: "var(--c-accent)", fontSize: "0.8125rem", fontWeight: 500, textDecoration: "none" }}>
-                  View all
-                </Link>
-              </div>
-
-              {loading && (
-                <div style={{ display: "flex", justifyContent: "center", padding: "48px 0" }}>
-                  <Loader2 size={18} color="var(--c-accent)" style={{ animation: "spin 1s linear infinite" }} />
-                </div>
+                </>
               )}
-
-              {!loading && runs.length === 0 && (
-                <div style={{ padding: "40px 24px", textAlign: "center" }}>
-                  <p style={{ color: "var(--c-text-3)", fontSize: "0.875rem", margin: "0 0 14px" }}>
-                    No runs yet.
-                  </p>
-                  <Link to="/app/generate" style={{
-                    display: "inline-flex", alignItems: "center", gap: 6,
-                    padding: "7px 14px", borderRadius: 7, background: "var(--c-accent-dim)",
-                    border: "1px solid var(--c-accent-glow)", color: "var(--c-accent)",
-                    textDecoration: "none", fontSize: "0.8125rem", fontWeight: 600,
-                  }}>
-                    <Sparkles size={13} />
-                    Start generating
-                  </Link>
-                </div>
-              )}
-
-              {!loading && runs.map((run, i) => (
-                <motion.div
-                  key={run.id}
-                  initial={{ opacity: 0, x: -4 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.03 }}
-                  style={{
-                    padding: "11px 20px",
-                    borderBottom: i < runs.length - 1 ? "1px solid var(--c-border)" : "none",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                      background: (STATUS_COLORS[run.status] ?? "#94a3b8") + "15",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      marginTop: 1,
-                    }}>
-                      <span style={{
-                        width: 7, height: 7, borderRadius: "50%",
-                        background: STATUS_COLORS[run.status] ?? "#94a3b8",
-                      }} />
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)" }}>
-                          {run.test_case_count} test cases
-                        </span>
-                        <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)" }}>
-                          from {run.requirement_count} reqs
-                        </span>
-                        {run.completed_at && (
-                          <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)" }}>
-                            · {formatDuration(run.created_at, run.completed_at)}
-                          </span>
-                        )}
-                        {run.status === "error" && (
-                          <span style={{ fontSize: "0.6875rem", color: "#f87171" }}>failed</span>
-                        )}
-                      </div>
-
-                      {run.status === "complete" && <CoverageStrip run={run} />}
-
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: run.status === "complete" ? 5 : 0 }}>
-                        {runCasesMap[run.id] && <AsilDots testCases={runCasesMap[run.id]} />}
-                        <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginLeft: runCasesMap[run.id] ? "auto" : 0 }}>
-                          {formatRelative(run.created_at)}
-                        </span>
-                      </div>
-
-                      {!runCasesMap[run.id] && (
-                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
-                          <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)" }}>
-                            {formatRelative(run.created_at)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                      <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", whiteSpace: "nowrap" }}>
-                        {formatDate(run.created_at)}
-                      </span>
-                      {run.status === "complete" && (
-                        <div style={{ display: "flex", gap: 4 }}>
-                          <Link
-                            to={`/app/test-cases?runId=${run.id}`}
-                            style={{
-                              fontSize: "0.6875rem", color: "var(--c-accent)", fontWeight: 600,
-                              textDecoration: "none", padding: "2px 8px", borderRadius: 4,
-                              background: "var(--c-accent-dim)", border: "1px solid var(--c-accent-glow)",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            Cases
-                          </Link>
-                          <Link
-                            to={`/app/traceability?runId=${run.id}`}
-                            style={{
-                              fontSize: "0.6875rem", color: "#60a5fa", fontWeight: 600,
-                              textDecoration: "none", padding: "2px 8px", borderRadius: 4,
-                              background: "rgba(96,165,250,0.08)", border: "1px solid rgba(96,165,250,0.2)",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            Trace
-                          </Link>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
             </div>
+          </SectionCard>
 
-            {/* Review Summary */}
-            <div style={{
-              background: "var(--c-surface)", border: "1px solid var(--c-border)",
-              borderRadius: 14, padding: "16px 18px",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)" }}>
-                  Review Summary
-                </div>
-                {lastRunCases && (
-                  <Link to="/app/review" style={{ fontSize: "0.75rem", color: "var(--c-accent)", fontWeight: 500, textDecoration: "none" }}>
-                    Open Review →
-                  </Link>
-                )}
-              </div>
-              {!lastRunCases ? (
-                <p style={{ color: "var(--c-text-3)", fontSize: "0.8125rem", margin: 0, lineHeight: 1.6 }}>
-                  Run a generation to see review status.
-                </p>
+          {/* Review / Validation Summary */}
+          <SectionCard
+            title="Review Summary"
+            action={lastRunCases ? { label: "Open Review →", to: "/app/review" } : undefined}
+          >
+            <div style={{ padding: "16px 18px" }}>
+              {!hasData || !lastRunCases ? (
+                <EmptyState icon={ClipboardCheck} title="No review data" description="Generate test cases and open the Review page to track approval status." />
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                  {[
-                    { label: "Approved", value: reviewApproved, color: "#10b981", icon: CheckCircle2 },
-                    { label: "Pending", value: reviewPending, color: "#94a3b8", icon: Clock },
-                    { label: "Rejected", value: reviewRejected, color: "#f87171", icon: AlertTriangle },
-                  ].map(item => (
-                    <div key={item.label} style={{
-                      background: item.color + "0C", border: `1px solid ${item.color}22`,
-                      borderRadius: 10, padding: "10px 12px",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
-                        <item.icon size={11} color={item.color} strokeWidth={2} />
-                        <span style={{ fontSize: "0.625rem", color: item.color, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                          {item.label}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: "1.25rem", fontWeight: 800, color: "var(--c-text)", lineHeight: 1, letterSpacing: "-0.03em" }}>
-                        {item.value}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right column */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
-            {/* Coverage distribution */}
-            <div style={{
-              background: "var(--c-surface)", border: "1px solid var(--c-border)",
-              borderRadius: 14, padding: "16px 18px",
-            }}>
-              <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 12 }}>
-                Coverage Distribution
-              </div>
-              {loading && (
-                <div style={{ display: "flex", justifyContent: "center", padding: "16px 0" }}>
-                  <Loader2 size={14} color="var(--c-text-3)" style={{ animation: "spin 1s linear infinite" }} />
-                </div>
-              )}
-              {!loading && !coverageData && (
-                <p style={{ color: "var(--c-text-3)", fontSize: "0.8125rem", margin: 0, lineHeight: 1.6 }}>
-                  Run a generation to see coverage breakdown.
-                </p>
-              )}
-              {coverageData && (() => {
-                const max = coverageData[0][1];
-                return (
-                  <>
-                    {coverageData.map(([type, count], i) => (
-                      <div key={type} style={{ marginBottom: i < coverageData.length - 1 ? 8 : 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                          <span style={{ fontSize: "0.75rem", color: "var(--c-text-2)", fontWeight: 500, textTransform: "capitalize" }}>
-                            {type.replace(/_/g, " ")}
-                          </span>
-                          <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)", fontFamily: "var(--font-mono)" }}>
-                            {count}
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 14 }}>
+                    {[
+                      { label: "Approved", value: reviewApproved, color: "#10b981", icon: CheckCircle2 },
+                      { label: "Pending",  value: reviewPending,  color: "#4A587A",  icon: Clock        },
+                      { label: "Rejected", value: reviewRejected, color: "#f87171",  icon: AlertTriangle },
+                    ].map(item => (
+                      <div key={item.label} style={{ background: item.color + "0C", border: `1px solid ${item.color}22`, borderRadius: 9, padding: "10px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
+                          <item.icon size={11} color={item.color} strokeWidth={2} />
+                          <span style={{ fontSize: "0.6rem", color: item.color, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>
+                            {item.label}
                           </span>
                         </div>
-                        <div style={{ height: 4, background: "var(--c-border)", borderRadius: 3 }}>
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${(count / max) * 100}%` }}
-                            transition={{ duration: 0.5, delay: i * 0.05 }}
-                            style={{ height: "100%", borderRadius: 3, background: TYPE_COLORS[type] ?? "#818cf8" }}
-                          />
+                        <div style={{ fontSize: "1.375rem", fontWeight: 800, color: "var(--c-text)", lineHeight: 1, letterSpacing: "-0.03em" }}>
+                          {item.value}
                         </div>
                       </div>
                     ))}
-                    <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--c-border)" }}>
-                      <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)" }}>
-                        {lastRunTotalCases} cases · last run
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-
-            {/* Risk Analysis */}
-            <div style={{
-              background: "var(--c-surface)", border: "1px solid var(--c-border)",
-              borderRadius: 14, padding: "16px 18px",
-            }}>
-              <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 12 }}>
-                Risk Analysis
-              </div>
-              {totalCasesAcrossRuns === 0 ? (
-                <p style={{ color: "var(--c-text-3)", fontSize: "0.8125rem", margin: 0, lineHeight: 1.6 }}>
-                  Risk breakdown appears after a completed run.
-                </p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                  {[
-                    { label: "High Risk", value: highRiskCount, color: "#f87171", note: "safety + fault injection" },
-                    { label: "Medium Risk", value: mediumRiskCount, color: "#f59e0b", note: "negative + boundary" },
-                    { label: "Low Risk", value: lowRiskCount, color: "#10b981", note: "functional + timing" },
-                  ].map(item => {
-                    const total = highRiskCount + mediumRiskCount + lowRiskCount || 1;
-                    return (
-                      <div key={item.label}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                          <span style={{ fontSize: "0.75rem", color: "var(--c-text-2)", fontWeight: 500 }}>{item.label}</span>
-                          <span style={{ fontSize: "0.75rem", color: item.color, fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-                            {item.value}
-                          </span>
-                        </div>
-                        <div style={{ height: 4, background: "var(--c-border)", borderRadius: 3 }}>
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${(item.value / total) * 100}%` }}
-                            transition={{ duration: 0.5 }}
-                            style={{ height: "100%", borderRadius: 3, background: item.color }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                  </div>
+                  {reviewTotal > 0 && (
+                    <ProgressRow label="Approval progress" value={reviewApproved} max={reviewTotal} color="#10b981" />
+                  )}
+                </>
               )}
             </div>
+          </SectionCard>
+        </div>
 
-            {/* Recent Activity */}
-            <div style={{
-              background: "var(--c-surface)", border: "1px solid var(--c-border)",
-              borderRadius: 14, padding: "16px 18px",
-            }}>
-              <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 12 }}>
-                Recent Activity
+        {/* ── Activity Tables ───────────────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: col2, gap: 12 }}>
+
+          {/* Recent Runs */}
+          <SectionCard title="Recent Runs" action={{ label: "View all", to: "/app/runs" }}>
+            {loading && (
+              <div style={{ display: "flex", justifyContent: "center", padding: "32px 0" }}>
+                <Loader2 size={16} color="var(--c-accent)" style={{ animation: "spin 1s linear infinite" }} />
               </div>
-              {activityFeed.length === 0 ? (
-                <p style={{ color: "var(--c-text-3)", fontSize: "0.8125rem", margin: 0, lineHeight: 1.6 }}>
-                  Activity will appear after your first run.
-                </p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {activityFeed.map((item, i) => {
-                    const def = ACTIVITY_ICONS[item.icon];
-                    return (
-                      <motion.div
-                        key={item.id}
-                        initial={{ opacity: 0, x: 4 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.04 }}
-                        style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
-                      >
-                        <div style={{
-                          width: 24, height: 24, borderRadius: 6, flexShrink: 0, marginTop: 1,
-                          background: def.color + "15",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                        }}>
-                          <def.icon size={11} color={def.color} strokeWidth={2} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: "0.75rem", color: "var(--c-text-2)", lineHeight: 1.4 }}>
-                            {item.label}
-                          </div>
-                          <div style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginTop: 2 }}>
-                            {item.time}
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
+            )}
+            {!loading && runs.length === 0 && (
+              <EmptyState icon={GitBranch} title="No runs yet" description="Start a generation run to see history." action={{ label: "Generate Tests", to: "/app/generate" }} />
+            )}
+            {!loading && runs.length > 0 && (
+              <div>
+                {/* Table header */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 90px", padding: "7px 18px", borderBottom: "1px solid var(--c-border)", gap: 8 }}>
+                  {["Run", "Status", "Date"].map(h => (
+                    <span key={h} style={{ fontSize: "0.6875rem", fontWeight: 700, color: "var(--c-text-3)", letterSpacing: "0.06em", textTransform: "uppercase" as const }}>
+                      {h}
+                    </span>
+                  ))}
                 </div>
-              )}
-            </div>
-
-            {/* Quick actions */}
-            <div style={{
-              background: "var(--c-surface)", border: "1px solid var(--c-border)",
-              borderRadius: 14, padding: "16px 18px",
-            }}>
-              <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)", marginBottom: 10 }}>
-                Quick Actions
+                {runs.slice(0, 6).map((run, i) => {
+                  const cfg = STATUS_CONFIG[run.status] ?? { color: "#4A587A", label: run.status };
+                  return (
+                    <motion.div
+                      key={run.id}
+                      initial={{ opacity: 0, x: -4 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      style={{ display: "grid", gridTemplateColumns: "1fr 80px 90px", padding: "9px 18px", borderBottom: i < runs.length - 1 ? "1px solid var(--c-border)" : "none", gap: 8, alignItems: "center", transition: "background 0.12s" }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {run.test_case_count} test cases
+                        </div>
+                        <div style={{ fontSize: "0.7rem", color: "var(--c-text-3)", marginTop: 2 }}>
+                          {run.requirement_count} requirements
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: "0.75rem", color: cfg.color, fontWeight: 500 }}>{cfg.label}</span>
+                      </div>
+                      <span style={{ fontSize: "0.7rem", color: "var(--c-text-3)" }}>{formatDate(run.created_at)}</span>
+                    </motion.div>
+                  );
+                })}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {[
-                  { to: "/app/generate", label: "New Generation Run", icon: Sparkles, color: "var(--c-accent)" },
-                  { to: "/app/test-cases", label: "Review Test Cases", icon: Activity, color: "#818cf8" },
-                  { to: "/app/traceability", label: "Traceability Matrix", icon: GitBranch, color: "#60a5fa" },
-                  { to: "/app/runs", label: "Run History", icon: PlayCircle, color: "#f59e0b" },
-                ].map(item => (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "8px 10px", borderRadius: 8,
-                      background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
-                      textDecoration: "none", color: "var(--c-text-2)",
-                      fontSize: "0.8125rem", fontWeight: 500,
-                      transition: "all 0.12s ease",
-                    }}
-                    onMouseEnter={e => {
-                      const el = e.currentTarget as HTMLElement;
-                      el.style.borderColor = "var(--c-border-2)";
-                      el.style.color = "var(--c-text)";
-                    }}
-                    onMouseLeave={e => {
-                      const el = e.currentTarget as HTMLElement;
-                      el.style.borderColor = "var(--c-border)";
-                      el.style.color = "var(--c-text-2)";
-                    }}
+            )}
+          </SectionCard>
+
+          {/* Top Projects */}
+          <SectionCard title="Projects" action={{ label: "View all", to: "/app/projects" }}>
+            {projects.length === 0 ? (
+              <EmptyState icon={FolderOpen} title="No projects" description="Create a project to organize your runs." action={{ label: "Create Project", onClick: () => setShowNewProject(true) }} />
+            ) : (
+              <div>
+                {/* Table header */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 48px 64px", padding: "7px 18px", borderBottom: "1px solid var(--c-border)", gap: 8 }}>
+                  {["Project", "Runs", "Test Cases"].map(h => (
+                    <span key={h} style={{ fontSize: "0.6875rem", fontWeight: 700, color: "var(--c-text-3)", letterSpacing: "0.06em", textTransform: "uppercase" as const }}>
+                      {h}
+                    </span>
+                  ))}
+                </div>
+                {projects.slice(0, 6).map((project, i) => (
+                  <motion.div
+                    key={project.id}
+                    initial={{ opacity: 0, x: 4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    style={{ display: "grid", gridTemplateColumns: "1fr 48px 64px", padding: "9px 18px", borderBottom: i < Math.min(projects.length, 6) - 1 ? "1px solid var(--c-border)" : "none", gap: 8, alignItems: "center", transition: "background 0.12s" }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                   >
-                    <item.icon size={14} color={item.color} strokeWidth={1.75} />
-                    {item.label}
-                  </Link>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: project.id === selectedProject?.id ? "var(--c-accent)" : "#4A587A", flexShrink: 0 }} />
+                      <span style={{ fontSize: "0.8rem", fontWeight: project.id === selectedProject?.id ? 600 : 500, color: project.id === selectedProject?.id ? "var(--c-text)" : "var(--c-text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {project.name}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: "0.8rem", color: "var(--c-text-3)", fontFamily: "var(--font-mono)" }}>
+                      {project.id === selectedProject?.id && stats ? stats.total_runs : "—"}
+                    </span>
+                    <span style={{ fontSize: "0.8rem", color: "var(--c-text-3)", fontFamily: "var(--font-mono)" }}>
+                      {project.id === selectedProject?.id && stats ? stats.total_test_cases.toLocaleString() : "—"}
+                    </span>
+                  </motion.div>
                 ))}
               </div>
-            </div>
-          </div>
+            )}
+          </SectionCard>
         </div>
       </div>
 
@@ -1030,3 +780,4 @@ export default function DashboardPage() {
     </PageTransition>
   );
 }
+

@@ -20,6 +20,9 @@ def _build_provider(name: str, api_key: str | None, model: str | None, endpoint:
             return OllamaProvider(endpoint=endpoint, model=model)
         except ImportError:
             raise RuntimeError("httpx package not installed. Run: pip install httpx")
+    if name == "gemini":
+        from .gemini_provider import GeminiProvider
+        return GeminiProvider(api_key=api_key, model=model)
     # Default: anthropic
     return AnthropicProvider(api_key=api_key, model=model)
 

@@ -5,17 +5,23 @@ import {
   Brain,
   CheckCircle2,
   ChevronDown,
+  Eye,
   FileText,
   GitBranch,
+  Key,
   Shield,
   Sparkles,
   Upload,
-  Zap,
+  Users,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-// ─── Static data ──────────────────────────────────────────────────────────────
+// ─── Constants ─────────────────────────────────────────────────────────────────
+
+const PRODUCT_NAME = 'AutoTestAI';
+
+const HERO_BADGES = ['ISO 26262', 'ASIL A–D', 'Traceability', 'Validation', 'Excel Export', 'JIRA Export', 'BYOK'];
 
 const PIPELINE_REQS = [
   { id: 'REQ_ADAS_001', label: 'AEB Activation Threshold', asil: 'D' },
@@ -33,18 +39,22 @@ const WORKFLOW_STEPS = [
   { icon: Upload,       label: 'Requirements', desc: 'PDF · DOCX · Text',        color: '#818cf8' },
   { icon: BookOpen,     label: 'Analysis',     desc: 'ISO 26262 Patterns',        color: '#a78bfa' },
   { icon: Brain,        label: 'Generation',   desc: 'AI · ASIL Classification',  color: '#8b5cf6' },
-  { icon: CheckCircle2, label: 'Validation',   desc: 'Coverage · Deduplication',  color: '#7c3aed' },
-  { icon: GitBranch,    label: 'Traceability', desc: 'Req-to-Test Matrix',         color: '#6d28d9' },
-  { icon: FileText,     label: 'Export',       desc: 'Excel · JIRA CSV',           color: '#5b21b6' },
+  { icon: Eye,          label: 'Review',       desc: 'Approve · Reject · Refine', color: '#7c3aed' },
+  { icon: CheckCircle2, label: 'Validation',   desc: 'Coverage · Deduplication',  color: '#6d28d9' },
+  { icon: FileText,     label: 'Export',       desc: 'Excel · JIRA CSV',          color: '#5b21b6' },
 ];
 
 const FEATURES = [
   {
-    icon: Sparkles, title: 'Test Case Generation', color: '#818cf8',
+    icon: Sparkles, title: 'AI Test Case Generation', color: '#818cf8',
     desc: 'AI-generated test cases with preconditions, steps, and expected results for every requirement.',
   },
   {
-    icon: CheckCircle2, title: 'Validation Engine', color: '#34d399',
+    icon: Users, title: 'Review & Approval Workflow', color: '#a78bfa',
+    desc: 'Structured review pipeline where engineers can approve, reject, or refine generated test cases before export.',
+  },
+  {
+    icon: CheckCircle2, title: 'Validation & Risk Analysis', color: '#34d399',
     desc: 'Coverage analysis, duplicate detection, and ASIL distribution review for every run.',
   },
   {
@@ -56,9 +66,27 @@ const FEATURES = [
     desc: 'ASIL classification from QM to D, aligned to Parts 6, 8 & 9.',
   },
   {
-    icon: FileText, title: 'Excel / JIRA Export', color: '#f472b6',
+    icon: FileText, title: 'Excel & JIRA Export', color: '#f472b6',
     desc: 'Export to structured Excel or JIRA-compatible CSV for your test management tool.',
   },
+  {
+    icon: Key, title: 'BYOK Provider Support', color: '#22d3ee',
+    desc: 'Use your own Groq, Claude, OpenAI, or Gemini API keys directly from Settings. No platform-managed AI credentials required.',
+  },
+];
+
+const BYOK_PROVIDERS = [
+  { name: 'Groq',   color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  border: 'rgba(245,158,11,0.25)'  },
+  { name: 'Claude', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.25)' },
+  { name: 'OpenAI', color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.22)'  },
+  { name: 'Gemini', color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',   border: 'rgba(96,165,250,0.22)'  },
+];
+
+const BYOK_FEATURES = [
+  'Provider selection',
+  'Model selection',
+  'Secure key storage',
+  'Switch providers anytime',
 ];
 
 const ASIL_BADGE: Record<string, { bg: string; border: string; color: string }> = {
@@ -101,22 +129,21 @@ function NavBar() {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 0 14px rgba(99,102,241,0.45)',
-        }}>
-          <Zap size={14} color="white" fill="white" />
-        </div>
-        <span style={{ color: 'white', fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em' }}>
-          Automotive TC Generator
-        </span>
+        <img
+          src="/logo-removebg-preview.png"
+          alt="GuJ Tech"
+          style={{ height: 36, width: 'auto', objectFit: 'contain', display: 'block', flexShrink: 0 }}
+        />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
-        {[{ label: 'Workflow', href: '#workflow' }, { label: 'Features', href: '#features' }].map(({ label, href }) => (
-          <a key={label} href={href} style={{ color: 'rgba(255,255,255,0.5)', textDecoration: 'none', fontSize: '0.875rem', transition: 'color 0.2s' }}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
+        {[
+          { label: 'Workflow', href: '#workflow' },
+          { label: 'Features', href: '#features' },
+          { label: 'BYOK',     href: '#byok'     },
+        ].map(({ label, href }) => (
+          <a key={label} href={href}
+            style={{ color: 'rgba(255,255,255,0.5)', textDecoration: 'none', fontSize: '0.875rem', transition: 'color 0.2s' }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'white'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; }}
           >
@@ -136,7 +163,7 @@ function NavBar() {
         >
           Sign In
         </Link>
-        <Link to="/app/generate" style={{
+        <Link to="/signin" style={{
           padding: '6px 18px', borderRadius: 8, textDecoration: 'none',
           background: '#6366f1', color: 'white', fontSize: '0.875rem', fontWeight: 600,
           boxShadow: '0 0 20px rgba(99,102,241,0.4)', transition: 'all 0.2s',
@@ -265,10 +292,7 @@ function PipelineCard() {
                 transition={{ duration: 1.4, repeat: Infinity }}
                 style={{ width: 5, height: 5, borderRadius: '50%', background: statusDotColor, flexShrink: 0 }}
               />
-              <span style={{
-                fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.07em',
-                color: statusDotColor,
-              }}>
+              <span style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.07em', color: statusDotColor }}>
                 {statusLabel}
               </span>
             </motion.div>
@@ -437,130 +461,6 @@ function PipelineCard() {
   );
 }
 
-// ─── Product Preview ──────────────────────────────────────────────────────────
-
-function ProductPreview() {
-  return (
-    <section id="product" style={{ padding: '80px 40px', maxWidth: 1200, margin: '0 auto' }}>
-      <SectionHeader
-        eyebrow="Product"
-        eyebrowColor="#818cf8"
-        eyebrowBg="rgba(99,102,241,0.1)"
-        eyebrowBorder="rgba(129,140,248,0.2)"
-        title="From requirements to a validated test suite"
-        sub="Upload your requirements document and get ISO 26262-compliant test cases, traced and export-ready."
-      />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 20 }}>
-        {/* Test Case Preview */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          whileInView={{ opacity: 1, x: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5 }}
-          style={{
-            background: 'rgba(255,255,255,0.025)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderTop: '1px solid rgba(255,255,255,0.12)',
-            borderRadius: 18, overflow: 'hidden',
-            boxShadow: '0 16px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
-          }}
-        >
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.02)' }}>
-            {[1,2,3].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />)}
-            <span style={{ marginLeft: 8, fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}>Generated Test Case</span>
-          </div>
-          <div style={{ padding: '20px 22px', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(129,140,248,0.3)', color: '#a5b4fc', fontSize: '0.7rem', fontWeight: 700 }}>TC-0042</span>
-              <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', fontSize: '0.7rem', fontWeight: 700 }}>ASIL-D</span>
-              <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.25)', color: '#6ee7b7', fontSize: '0.7rem' }}>functional</span>
-            </div>
-            <div style={{ color: 'white', fontWeight: 600, marginBottom: 6, fontSize: '0.85rem', fontFamily: 'var(--font)', letterSpacing: '-0.01em' }}>AEB Emergency Braking — Forward Collision Detection</div>
-            <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.75rem', marginBottom: 18, fontFamily: 'var(--font)' }}>Linked to: REQ_ADAS_001</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-              {[
-                { label: 'Preconditions', color: '#818cf8', items: ['Vehicle speed ≥ 30 km/h', 'No active braking', 'Object in path'] },
-                { label: 'Test Steps', color: '#34d399', items: ['Place obstacle at 15m', 'Set speed to 80 km/h', 'Monitor AEB trigger'] },
-                { label: 'Expected', color: '#60a5fa', items: ['AEB activates ≤ 200ms', 'Full stop before obstacle', 'Event log recorded'] },
-              ].map(col => (
-                <div key={col.label}>
-                  <div style={{ color: col.color, fontSize: '0.67rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>{col.label}</div>
-                  {col.items.map((item, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'flex-start' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.2)', flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>
-                      <span style={{ color: 'rgba(255,255,255,0.6)', lineHeight: 1.4, fontFamily: 'var(--font)' }}>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Traceability Matrix Preview */}
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          whileInView={{ opacity: 1, x: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          style={{
-            background: 'rgba(255,255,255,0.025)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderTop: '1px solid rgba(255,255,255,0.12)',
-            borderRadius: 18, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 16px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
-          }}
-        >
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.02)' }}>
-            {[1,2,3].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />)}
-            <span style={{ marginLeft: 8, fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}>Traceability Matrix</span>
-            <span style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: 4, background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', color: '#6ee7b7', fontSize: '0.7rem' }}>100% Coverage</span>
-          </div>
-          <div style={{ padding: '20px 22px', flex: 1 }}>
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font)' }}>Requirement Coverage</span>
-                <span style={{ fontSize: '0.75rem', color: '#6ee7b7', fontWeight: 600, fontFamily: 'var(--font)' }}>5 / 5</span>
-              </div>
-              <div style={{ height: 4, background: 'rgba(255,255,255,0.07)', borderRadius: 2, overflow: 'hidden' }}>
-                <motion.div initial={{ width: 0 }} whileInView={{ width: '100%' }} viewport={{ once: true }} transition={{ duration: 1, delay: 0.3 }}
-                  style={{ height: '100%', background: 'linear-gradient(90deg, #34d399, #6ee7b7)', borderRadius: 2 }} />
-              </div>
-            </div>
-            {[
-              { req: 'REQ_ADAS_001', title: 'AEB Activation Threshold', tests: ['TC-0041', 'TC-0042'], asil: 'D' },
-              { req: 'REQ_ADAS_002', title: 'Brake Force Calculation',  tests: ['TC-0044', 'TC-0045'], asil: 'D' },
-              { req: 'REQ_ADAS_003', title: 'Sensor Fusion Override',   tests: ['TC-0046'],            asil: 'C' },
-              { req: 'REQ_ADAS_004', title: 'System Deactivation Logic',tests: ['TC-0047'],            asil: 'B' },
-              { req: 'REQ_ADAS_005', title: 'Driver Alert Protocol',    tests: ['TC-0049'],            asil: 'A' },
-            ].map((row, i) => (
-              <motion.div key={row.req} initial={{ opacity: 0, x: 10 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
-                transition={{ duration: 0.3, delay: 0.2 + i * 0.06 }}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderBottom: i < 4 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
-              >
-                <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(129,140,248,0.2)', color: '#a5b4fc', fontSize: '0.65rem', fontWeight: 600, whiteSpace: 'nowrap', fontFamily: 'monospace' }}>{row.req}</span>
-                <span style={{ flex: 1, fontSize: '0.78rem', color: 'rgba(255,255,255,0.55)', fontFamily: 'var(--font)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {row.tests.map(tc => <span key={tc} style={{ padding: '1px 5px', borderRadius: 3, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.4)', fontSize: '0.65rem', fontFamily: 'monospace' }}>{tc}</span>)}
-                </div>
-                <span style={{
-                  padding: '2px 6px', borderRadius: 4, fontSize: '0.65rem', fontWeight: 700, whiteSpace: 'nowrap',
-                  background: ASIL_BADGE[row.asil]?.bg,
-                  border: `1px solid ${ASIL_BADGE[row.asil]?.border}`,
-                  color: ASIL_BADGE[row.asil]?.color,
-                }}>ASIL-{row.asil}</span>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
 // ─── Section Header ───────────────────────────────────────────────────────────
 
 function SectionHeader({
@@ -595,15 +495,177 @@ function SectionHeader({
   );
 }
 
+// ─── BYOK Section ─────────────────────────────────────────────────────────────
+
+function BYOKSection() {
+  return (
+    <section id="byok" style={{
+      padding: '80px 40px',
+      background: 'rgba(255,255,255,0.008)',
+      borderTop: '1px solid rgba(255,255,255,0.05)',
+      borderBottom: '1px solid rgba(255,255,255,0.05)',
+    }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: 60, alignItems: 'center',
+        }}>
+          {/* Left: copy */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+          >
+            <span style={{
+              display: 'inline-block', padding: '4px 12px', borderRadius: 6, marginBottom: 18,
+              background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.2)',
+              fontSize: '0.7rem', fontWeight: 700, color: '#22d3ee',
+              letterSpacing: '0.09em', textTransform: 'uppercase' as const,
+            }}>
+              BYOK
+            </span>
+            <h2 style={{ fontSize: 'clamp(26px, 3vw, 38px)', fontWeight: 700, color: 'white', letterSpacing: '-0.025em', margin: '0 0 14px' }}>
+              Bring Your Own AI
+            </h2>
+            <p style={{ fontSize: '1rem', color: 'rgba(255,255,255,0.44)', margin: '0 0 28px', lineHeight: 1.7, maxWidth: 420 }}>
+              Connect your own API keys from Settings. No platform-managed credentials — you stay in full control of model choice and costs.
+            </p>
+
+            {/* Provider pills */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 28 }}>
+              {BYOK_PROVIDERS.map(p => (
+                <span key={p.name} style={{
+                  padding: '6px 16px', borderRadius: 8,
+                  background: p.bg, border: `1px solid ${p.border}`,
+                  color: p.color, fontSize: '0.875rem', fontWeight: 600,
+                }}>
+                  {p.name}
+                </span>
+              ))}
+            </div>
+
+            {/* Feature checklist */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {BYOK_FEATURES.map(f => (
+                <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <CheckCircle2 size={14} color="#22d3ee" />
+                  <span style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.55)' }}>{f}</span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          {/* Right: settings card mockup */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            style={{
+              background: 'rgba(255,255,255,0.025)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(34,211,238,0.1)',
+              borderTop: '1px solid rgba(34,211,238,0.22)',
+              borderRadius: 18, overflow: 'hidden',
+              boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
+            }}
+          >
+            {/* Window chrome */}
+            <div style={{ padding: '11px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(255,255,255,0.02)' }}>
+              {['rgba(239,68,68,0.5)', 'rgba(245,158,11,0.5)', 'rgba(52,211,153,0.5)'].map((c, i) => (
+                <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />
+              ))}
+              <span style={{ marginLeft: 8, fontSize: '0.7rem', fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)' }}>
+                Settings — AI Provider
+              </span>
+            </div>
+
+            <div style={{ padding: '20px' }}>
+              <div style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)', marginBottom: 14 }}>
+                AI Provider
+              </div>
+
+              {BYOK_PROVIDERS.map((p, i) => (
+                <motion.div
+                  key={p.name}
+                  initial={{ opacity: 0, x: 10 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.25 + i * 0.07 }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 14px', borderRadius: 10, marginBottom: 8,
+                    background: i === 0 ? p.bg : 'rgba(255,255,255,0.02)',
+                    border: `1px solid ${i === 0 ? p.border : 'rgba(255,255,255,0.06)'}`,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: i === 0 ? p.color : 'rgba(255,255,255,0.12)',
+                  }} />
+                  <span style={{
+                    flex: 1, fontSize: '0.875rem',
+                    color: i === 0 ? 'white' : 'rgba(255,255,255,0.35)',
+                    fontWeight: i === 0 ? 600 : 400,
+                  }}>
+                    {p.name}
+                  </span>
+                  {i === 0 && (
+                    <span style={{
+                      padding: '2px 8px', borderRadius: 4,
+                      background: p.bg, border: `1px solid ${p.border}`,
+                      color: p.color, fontSize: '0.62rem', fontWeight: 700,
+                    }}>
+                      Active
+                    </span>
+                  )}
+                </motion.div>
+              ))}
+
+              {/* API Key row */}
+              <div style={{
+                marginTop: 16, padding: '11px 14px', borderRadius: 10,
+                background: 'rgba(34,211,238,0.04)', border: '1px solid rgba(34,211,238,0.1)',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Key size={12} color="#22d3ee" />
+                <span style={{ flex: 1, fontSize: '0.75rem', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace' }}>
+                  gsk_••••••••••••••••••••••
+                </span>
+                <span style={{
+                  padding: '2px 6px', borderRadius: 4,
+                  background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)',
+                  color: '#6ee7b7', fontSize: '0.6rem', fontWeight: 700,
+                }}>
+                  VALID
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
   const [wide, setWide] = useState(
     typeof window !== 'undefined' ? window.innerWidth >= 1060 : true
   );
+  const [workflowWide, setWorkflowWide] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : true
+  );
 
   useEffect(() => {
-    const onResize = () => setWide(window.innerWidth >= 1060);
+    const onResize = () => {
+      setWide(window.innerWidth >= 1060);
+      setWorkflowWide(window.innerWidth >= 768);
+    };
     window.addEventListener('resize', onResize, { passive: true });
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -616,7 +678,7 @@ export default function HomePage() {
       <section style={{
         position: 'relative', minHeight: '100vh',
         display: 'flex', alignItems: 'center',
-        padding: wide ? '100px 80px' : '120px 32px 80px',
+        padding: wide ? '100px 80px' : '120px 24px 80px',
         overflow: 'hidden',
       }}>
         {/* Subtle grid */}
@@ -626,7 +688,7 @@ export default function HomePage() {
           backgroundSize: '64px 64px', opacity: 0.018,
         }} />
 
-        {/* Radial lighting — behind the pipeline card */}
+        {/* Radial lighting */}
         <div style={{
           position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
           width: 700, height: 700, pointerEvents: 'none',
@@ -666,29 +728,46 @@ export default function HomePage() {
               transition={{ duration: 0.5, delay: 0.18 }}
               style={{
                 fontSize: '1.0625rem', color: 'rgba(255,255,255,0.44)',
-                maxWidth: 500, margin: wide ? '0 0 40px' : '0 auto 40px',
+                maxWidth: 520, margin: wide ? '0 0 16px' : '0 auto 16px',
                 lineHeight: 1.75,
               }}
             >
-              Generate automotive test cases, validation reports, and traceability
-              matrices from requirements in minutes.
+              Generate ISO 26262-compliant automotive test cases, validation reports, and traceability matrices from requirements using AI.
             </motion.p>
+
+            {/* BYOK callout */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.28 }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '6px 14px', borderRadius: 8, marginBottom: 32,
+                background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.16)',
+              }}
+            >
+              <Key size={12} color="#22d3ee" />
+              <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)' }}>
+                <span style={{ color: '#22d3ee', fontWeight: 600 }}>Bring Your Own Key</span>
+                {' '}— Use Groq, Claude, OpenAI, or Gemini with your own API credentials.
+              </span>
+            </motion.div>
 
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
+              transition={{ duration: 0.5, delay: 0.36 }}
               style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: wide ? 'flex-start' : 'center' }}
             >
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
-                <Link to="/app/generate" style={{
+                <Link to="/signin" style={{
                   display: 'inline-flex', alignItems: 'center', gap: 9,
                   padding: '13px 28px', borderRadius: 11,
                   background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
                   color: 'white', textDecoration: 'none', fontSize: '0.9375rem', fontWeight: 600,
                   boxShadow: '0 0 32px rgba(99,102,241,0.4)',
                 }}>
-                  Generate Test Cases <ArrowRight size={17} />
+                  Get Started <ArrowRight size={17} />
                 </Link>
               </motion.div>
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
@@ -703,18 +782,25 @@ export default function HomePage() {
               </motion.div>
             </motion.div>
 
-            {/* Technical compatibility tags */}
+            {/* Badges */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.55 }}
               style={{ display: 'flex', gap: 6, marginTop: 28, flexWrap: 'wrap', justifyContent: wide ? 'flex-start' : 'center' }}
             >
-              {['ISO 26262', 'Part 6', 'Part 8', 'Part 9', 'ASIL A–D', 'Excel', 'JIRA CSV'].map(tag => (
+              {HERO_BADGES.map(tag => (
                 <span key={tag} style={{
                   padding: '3px 10px', borderRadius: 5,
-                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)',
-                  fontSize: '0.72rem', color: 'rgba(255,255,255,0.26)', fontWeight: 500,
+                  background: tag === 'BYOK'
+                    ? 'rgba(34,211,238,0.06)'
+                    : 'rgba(255,255,255,0.04)',
+                  border: tag === 'BYOK'
+                    ? '1px solid rgba(34,211,238,0.2)'
+                    : '1px solid rgba(255,255,255,0.07)',
+                  fontSize: '0.72rem',
+                  color: tag === 'BYOK' ? '#22d3ee' : 'rgba(255,255,255,0.28)',
+                  fontWeight: tag === 'BYOK' ? 600 : 500,
                 }}>
                   {tag}
                 </span>
@@ -722,7 +808,7 @@ export default function HomePage() {
             </motion.div>
           </div>
 
-          {/* Right: pipeline card */}
+          {/* Right: pipeline card (desktop only) */}
           {wide && (
             <motion.div
               initial={{ opacity: 0, x: 30 }}
@@ -730,7 +816,6 @@ export default function HomePage() {
               transition={{ duration: 0.7, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
               style={{ flexShrink: 0, position: 'relative' }}
             >
-              {/* Soft glow around the card */}
               <div style={{
                 position: 'absolute', inset: -60, pointerEvents: 'none',
                 background: 'radial-gradient(circle at 50% 50%, rgba(99,102,241,0.12) 0%, transparent 65%)',
@@ -743,7 +828,7 @@ export default function HomePage() {
 
       {/* ── Workflow ── */}
       <section id="workflow" style={{
-        padding: '100px 40px',
+        padding: '80px 40px',
         background: 'rgba(255,255,255,0.01)',
         borderTop: '1px solid rgba(255,255,255,0.05)',
         borderBottom: '1px solid rgba(255,255,255,0.05)',
@@ -757,66 +842,107 @@ export default function HomePage() {
             title="Requirements to export in six steps"
             sub="A fully automated validation pipeline for automotive safety engineering."
           />
-          <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: 0, overflowX: 'auto', paddingBottom: 8 }}>
-            {WORKFLOW_STEPS.map((step, i) => (
-              <div key={step.label} style={{ display: 'flex', alignItems: 'center', flex: '1 1 auto', minWidth: 0 }}>
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.4, delay: i * 0.08 }}
-                  whileHover={{ y: -6, transition: { duration: 0.2 } }}
-                  style={{
-                    flex: 1, padding: '24px 20px', textAlign: 'center',
-                    background: 'rgba(255,255,255,0.03)',
-                    backdropFilter: 'blur(16px) saturate(160%)',
-                    border: `1px solid ${step.color}22`,
-                    borderTop: `1px solid ${step.color}40`,
-                    borderRadius: 14, position: 'relative', cursor: 'default',
-                    boxShadow: `0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07)`,
-                    transition: 'box-shadow 0.2s, border-color 0.2s',
-                  }}
-                  onMouseEnter={e => {
-                    const el = e.currentTarget as HTMLElement;
-                    el.style.boxShadow = `0 20px 56px rgba(0,0,0,0.5), 0 0 0 1px ${step.color}30, inset 0 1px 0 rgba(255,255,255,0.1)`;
-                  }}
-                  onMouseLeave={e => {
-                    const el = e.currentTarget as HTMLElement;
-                    el.style.boxShadow = `0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07)`;
-                  }}
-                >
-                  <div style={{
-                    width: 42, height: 42, borderRadius: 11, margin: '0 auto 14px',
-                    background: step.color + '1a', border: `1px solid ${step.color}35`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: `0 0 16px ${step.color}20`,
-                  }}>
-                    <step.icon size={18} color={step.color} strokeWidth={1.75} />
-                  </div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white', letterSpacing: '-0.01em', marginBottom: 5 }}>{step.label}</div>
-                  <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.32)', lineHeight: 1.5 }}>{step.desc}</div>
-                  <div style={{ position: 'absolute', top: 8, right: 10, fontSize: '0.65rem', fontWeight: 700, color: step.color + '50', letterSpacing: '0.04em' }}>
-                    {String(i + 1).padStart(2, '0')}
-                  </div>
-                </motion.div>
-                {i < WORKFLOW_STEPS.length - 1 && (
+
+          {workflowWide ? (
+            /* Desktop: horizontal */
+            <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: 0 }}>
+              {WORKFLOW_STEPS.map((step, i) => (
+                <div key={step.label} style={{ display: 'flex', alignItems: 'center', flex: '1 1 auto', minWidth: 0 }}>
                   <motion.div
-                    initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
-                    transition={{ delay: i * 0.08 + 0.2 }}
-                    style={{ flexShrink: 0, padding: '0 6px', color: 'rgba(255,255,255,0.14)', fontSize: '1.25rem', fontWeight: 300 }}
-                  >→</motion.div>
-                )}
-              </div>
-            ))}
-          </div>
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.4, delay: i * 0.08 }}
+                    whileHover={{ y: -6, transition: { duration: 0.2 } }}
+                    style={{
+                      flex: 1, padding: '22px 16px', textAlign: 'center',
+                      background: 'rgba(255,255,255,0.03)',
+                      backdropFilter: 'blur(16px) saturate(160%)',
+                      border: `1px solid ${step.color}22`,
+                      borderTop: `1px solid ${step.color}40`,
+                      borderRadius: 14, position: 'relative', cursor: 'default',
+                      boxShadow: `0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07)`,
+                      transition: 'box-shadow 0.2s',
+                    }}
+                    onMouseEnter={e => {
+                      const el = e.currentTarget as HTMLElement;
+                      el.style.boxShadow = `0 20px 56px rgba(0,0,0,0.5), 0 0 0 1px ${step.color}30, inset 0 1px 0 rgba(255,255,255,0.1)`;
+                    }}
+                    onMouseLeave={e => {
+                      const el = e.currentTarget as HTMLElement;
+                      el.style.boxShadow = `0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07)`;
+                    }}
+                  >
+                    <div style={{
+                      width: 40, height: 40, borderRadius: 10, margin: '0 auto 12px',
+                      background: step.color + '1a', border: `1px solid ${step.color}35`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: `0 0 16px ${step.color}20`,
+                    }}>
+                      <step.icon size={17} color={step.color} strokeWidth={1.75} />
+                    </div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'white', letterSpacing: '-0.01em', marginBottom: 4 }}>{step.label}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.32)', lineHeight: 1.5 }}>{step.desc}</div>
+                    <div style={{ position: 'absolute', top: 8, right: 10, fontSize: '0.62rem', fontWeight: 700, color: step.color + '45', letterSpacing: '0.04em' }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </div>
+                  </motion.div>
+                  {i < WORKFLOW_STEPS.length - 1 && (
+                    <motion.div
+                      initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
+                      transition={{ delay: i * 0.08 + 0.2 }}
+                      style={{ flexShrink: 0, padding: '0 5px', color: 'rgba(255,255,255,0.14)', fontSize: '1.1rem' }}
+                    >→</motion.div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Mobile: vertical */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 420, margin: '0 auto' }}>
+              {WORKFLOW_STEPS.map((step, i) => (
+                <div key={step.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <motion.div
+                    initial={{ opacity: 0, x: -16 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.35, delay: i * 0.07 }}
+                    style={{
+                      width: '100%', padding: '16px 20px',
+                      display: 'flex', alignItems: 'center', gap: 16,
+                      background: 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${step.color}22`,
+                      borderLeft: `3px solid ${step.color}60`,
+                      borderRadius: 12,
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                      background: step.color + '1a', border: `1px solid ${step.color}30`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <step.icon size={16} color={step.color} strokeWidth={1.75} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'white', marginBottom: 2 }}>{step.label}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.32)' }}>{step.desc}</div>
+                    </div>
+                    <span style={{ marginLeft: 'auto', fontSize: '0.65rem', fontWeight: 700, color: step.color + '50' }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                  </motion.div>
+                  {i < WORKFLOW_STEPS.length - 1 && (
+                    <div style={{ width: 1, height: 12, background: 'rgba(255,255,255,0.08)' }} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* ── Product Preview ── */}
-      <ProductPreview />
-
       {/* ── Features ── */}
-      <section id="features" style={{ padding: '100px 40px' }}>
+      <section id="features" style={{ padding: '80px 40px' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
           <SectionHeader
             eyebrow="Features"
@@ -826,7 +952,7 @@ export default function HomePage() {
             title="Everything for automotive test automation"
             sub="Purpose-built for functional safety engineering teams."
           />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 18 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
             {FEATURES.map((f, i) => (
               <motion.div
                 key={f.title}
@@ -840,7 +966,7 @@ export default function HomePage() {
                   backdropFilter: 'blur(20px)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderTop: '1px solid rgba(255,255,255,0.11)',
-                  borderRadius: 16, padding: '28px',
+                  borderRadius: 16, padding: '26px',
                   cursor: 'default',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)',
                   transition: 'border-color 0.2s, box-shadow 0.2s',
@@ -859,14 +985,14 @@ export default function HomePage() {
                 }}
               >
                 <div style={{
-                  width: 44, height: 44, borderRadius: 12, marginBottom: 20,
+                  width: 42, height: 42, borderRadius: 11, marginBottom: 18,
                   background: f.color + '18', border: `1px solid ${f.color}30`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   boxShadow: `0 0 20px ${f.color}15`,
                 }}>
-                  <f.icon size={20} color={f.color} strokeWidth={1.75} />
+                  <f.icon size={19} color={f.color} strokeWidth={1.75} />
                 </div>
-                <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'white', margin: '0 0 10px', letterSpacing: '-0.01em' }}>{f.title}</h3>
+                <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'white', margin: '0 0 9px', letterSpacing: '-0.01em' }}>{f.title}</h3>
                 <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.44)', margin: 0, lineHeight: 1.65 }}>{f.desc}</p>
               </motion.div>
             ))}
@@ -874,137 +1000,53 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── Validation & Risk Analysis ── */}
-      <section style={{
-        padding: '100px 40px',
-        background: 'rgba(255,255,255,0.008)',
-        borderTop: '1px solid rgba(255,255,255,0.05)',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
-      }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <SectionHeader
-            eyebrow="Validation"
-            eyebrowColor="#34d399"
-            eyebrowBg="rgba(52,211,153,0.1)"
-            eyebrowBorder="rgba(52,211,153,0.2)"
-            title="Validation & Risk Analysis"
-            sub="Automated quality gates that verify completeness, consistency, and safety classification before export."
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-            {[
-              {
-                icon: CheckCircle2, color: '#34d399',
-                title: 'Consistency Validation',
-                desc: 'Cross-check requirements for conflicting constraints, duplicate identifiers, and missing ASIL classifications.',
-              },
-              {
-                icon: Shield, color: '#60a5fa',
-                title: 'Coverage Gap Detection',
-                desc: 'Identify requirements with zero test cases and functional areas with insufficient test type coverage.',
-              },
-              {
-                icon: Zap, color: '#f59e0b',
-                title: 'Risk Classification',
-                desc: 'Automatically classify test cases by risk severity using ASIL level, test type, and expected result criticality.',
-              },
-              {
-                icon: BookOpen, color: '#a78bfa',
-                title: 'ASIL Compliance Review',
-                desc: 'Verify that test case distribution meets ISO 26262 Part 6 requirements for each ASIL level in the requirement set.',
-              },
-              {
-                icon: GitBranch, color: '#f472b6',
-                title: 'Traceability Completeness',
-                desc: 'Validate end-to-end requirement-to-test traceability and flag any orphaned test cases or uncovered requirements.',
-              },
-            ].map((item, i) => (
-              <motion.div
-                key={item.title}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: '-40px' }}
-                transition={{ duration: 0.35, delay: i * 0.07 }}
-                whileHover={{ y: -5, transition: { duration: 0.2 } }}
-                style={{
-                  background: 'rgba(255,255,255,0.025)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255,255,255,0.07)',
-                  borderTop: `1px solid ${item.color}30`,
-                  borderRadius: 16, padding: '26px 24px',
-                  cursor: 'default',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)',
-                  transition: 'border-color 0.2s, box-shadow 0.2s',
-                }}
-                onMouseEnter={e => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.borderTopColor = item.color + '60';
-                  el.style.boxShadow = `0 16px 48px rgba(0,0,0,0.38), 0 0 0 1px ${item.color}14, inset 0 1px 0 rgba(255,255,255,0.07)`;
-                }}
-                onMouseLeave={e => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.borderTopColor = item.color + '30';
-                  el.style.boxShadow = '0 4px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)';
-                }}
-              >
-                <div style={{
-                  width: 40, height: 40, borderRadius: 10, marginBottom: 18,
-                  background: item.color + '16', border: `1px solid ${item.color}28`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 0 18px ${item.color}12`,
-                }}>
-                  <item.icon size={18} color={item.color} strokeWidth={1.75} />
-                </div>
-                <h3 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'white', margin: '0 0 9px', letterSpacing: '-0.01em' }}>{item.title}</h3>
-                <p style={{ fontSize: '0.8375rem', color: 'rgba(255,255,255,0.4)', margin: 0, lineHeight: 1.65 }}>{item.desc}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* ── BYOK ── */}
+      <BYOKSection />
 
       {/* ── CTA ── */}
-      <section style={{ padding: '0 40px 100px', textAlign: 'center' }}>
+      <section style={{ padding: '80px 40px', textAlign: 'center' }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           style={{
-            maxWidth: 680, margin: '0 auto',
+            maxWidth: 620, margin: '0 auto',
             background: 'rgba(255,255,255,0.025)',
             backdropFilter: 'blur(24px)',
             border: '1px solid rgba(129,140,248,0.18)',
             borderTop: '1px solid rgba(129,140,248,0.35)',
-            borderRadius: 24, padding: '64px 48px',
+            borderRadius: 24, padding: '56px 48px',
             boxShadow: '0 24px 72px rgba(0,0,0,0.4), 0 0 0 1px rgba(99,102,241,0.08) inset',
           }}
         >
-          <h2 style={{ fontSize: 'clamp(26px, 4vw, 38px)', fontWeight: 700, color: 'white', letterSpacing: '-0.025em', margin: '0 0 14px' }}>
+          <h2 style={{ fontSize: 'clamp(24px, 4vw, 36px)', fontWeight: 700, color: 'white', letterSpacing: '-0.025em', margin: '0 0 12px' }}>
             Start generating test cases
           </h2>
-          <p style={{ fontSize: '1.0625rem', color: 'rgba(255,255,255,0.44)', margin: '0 0 40px', lineHeight: 1.65 }}>
-            Upload your requirements and get a full ISO 26262 test suite in minutes.
+          <p style={{ fontSize: '1rem', color: 'rgba(255,255,255,0.44)', margin: '0 0 36px', lineHeight: 1.65 }}>
+            Sign in and upload your requirements to get a full ISO 26262 test suite in minutes.
           </p>
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-            <Link to="/app/generate" style={{
+            <Link to="/signin" style={{
               display: 'inline-flex', alignItems: 'center', gap: 9,
               padding: '14px 36px', borderRadius: 12,
               background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
               color: 'white', textDecoration: 'none', fontSize: '0.9375rem', fontWeight: 600,
               boxShadow: '0 0 44px rgba(99,102,241,0.5)',
             }}>
-              Generate Test Cases <ArrowRight size={17} />
+              Get Started <ArrowRight size={17} />
             </Link>
           </motion.div>
         </motion.div>
       </section>
 
       {/* ── Footer ── */}
-      <footer style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '36px 40px', textAlign: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
-          <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Zap size={12} color="white" fill="white" />
-          </div>
-          <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: '0.875rem', fontWeight: 600 }}>Automotive Test Case Generator</span>
+      <footer style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '32px 40px', textAlign: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+          <img
+            src="/logo-removebg-preview.png"
+            alt="GuJ Tech"
+            style={{ height: 28, width: 'auto', objectFit: 'contain', display: 'block', opacity: 0.75 }}
+          />
         </div>
         <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8125rem', margin: 0 }}>
           ISO 26262 Automotive Validation Platform

@@ -12,13 +12,30 @@ import {
   Plus,
   Settings,
   Sparkles,
-  Zap,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { createProject, getProjectStats, listProjects } from '../../api/client';
 import type { Project } from '../../types';
+
+// ─── Sidebar design tokens (navy, isolated from global CSS vars) ──────────────
+
+const SB = {
+  bg:          '#0B1120',              // deep navy background
+  bgHeader:    'rgba(0,0,0,0.28)',     // slightly darker header/footer strip
+  border:      'rgba(255,255,255,0.08)',
+  text:        '#E2E8F0',              // primary text
+  textMuted:   '#718096',             // inactive nav items
+  textDim:     '#3D4F6B',             // section labels, very dim elements
+  hover:       'rgba(255,255,255,0.05)',
+  activeBg:    'rgba(129,140,248,0.14)', // active item fill
+  activeText:  '#FAFAFA',             // active item text
+  activeAccent:'#818CF8',             // active icon + left border colour
+  divider:     'rgba(255,255,255,0.07)',
+  badgeBg:     'rgba(255,255,255,0.06)',
+  badgeBorder: 'rgba(255,255,255,0.10)',
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +45,7 @@ function formatRelativeShort(iso: string | null | undefined): string {
   if (!iso) return '';
   try {
     const diff = Date.now() - new Date(iso).getTime();
-    if (diff < 60_000) return 'just now';
+    if (diff < 60_000) return 'now';
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
     if (diff < 2_592_000_000) return `${Math.floor(diff / 86_400_000)}d`;
@@ -36,7 +53,7 @@ function formatRelativeShort(iso: string | null | undefined): string {
   } catch { return ''; }
 }
 
-// ─── New Project Inline Modal ─────────────────────────────────────────────────
+// ─── New Project Modal ────────────────────────────────────────────────────────
 
 function NewProjectModal({ onClose, onCreated }: {
   onClose: () => void;
@@ -81,18 +98,21 @@ function NewProjectModal({ onClose, onCreated }: {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        initial={{ opacity: 0, scale: 0.97, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
         style={{
           background: 'var(--c-surface)', border: '1px solid var(--c-border)',
-          borderRadius: 16, padding: '22px 24px', width: '100%', maxWidth: 380,
-          boxShadow: '0 20px 64px rgba(0,0,0,0.55)',
+          borderRadius: 14, padding: '22px 24px', width: '100%', maxWidth: 380,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
         }}
       >
-        <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--c-text)', marginBottom: 14 }}>
+        <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--c-text)', marginBottom: 4 }}>
           New Project
+        </div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--c-text-3)', marginBottom: 16 }}>
+          Create a project to organise your requirements and test runs.
         </div>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <input
@@ -100,11 +120,12 @@ function NewProjectModal({ onClose, onCreated }: {
             type="text"
             value={name}
             onChange={e => { setName(e.target.value); setError(''); }}
-            placeholder="Project name (e.g. AEB Validation)"
+            placeholder="e.g. AEB Safety Validation"
             style={{
-              width: '100%', padding: '9px 12px', borderRadius: 9, boxSizing: 'border-box',
-              background: 'var(--c-bg-2)', border: `1px solid ${error ? 'rgba(239,68,68,0.5)' : 'var(--c-border)'}`,
+              width: '100%', padding: '9px 12px', borderRadius: 8, boxSizing: 'border-box',
+              background: 'var(--c-bg)', border: `1px solid ${error ? 'rgba(239,68,68,0.5)' : 'var(--c-border)'}`,
               color: 'var(--c-text)', fontSize: '0.875rem', outline: 'none', fontFamily: 'var(--font)',
+              transition: 'border-color 0.15s',
             }}
             onFocus={e => { (e.target as HTMLInputElement).style.borderColor = 'var(--c-accent)'; }}
             onBlur={e => { (e.target as HTMLInputElement).style.borderColor = error ? 'rgba(239,68,68,0.5)' : 'var(--c-border)'; }}
@@ -115,10 +136,12 @@ function NewProjectModal({ onClose, onCreated }: {
               type="button" onClick={onClose}
               style={{
                 flex: 1, padding: '8px', borderRadius: 8, border: '1px solid var(--c-border)',
-                background: 'var(--c-bg-2)', color: 'var(--c-text-2)', cursor: 'pointer',
+                background: 'transparent', color: 'var(--c-text-2)', cursor: 'pointer',
                 fontSize: '0.8125rem', fontFamily: 'var(--font)',
               }}
-            >Cancel</button>
+            >
+              Cancel
+            </button>
             <button
               type="submit" disabled={loading}
               style={{
@@ -131,7 +154,7 @@ function NewProjectModal({ onClose, onCreated }: {
             >
               {loading
                 ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-                : <><Plus size={12} /> Create</>
+                : <><Plus size={12} /> Create Project</>
               }
             </button>
           </div>
@@ -162,7 +185,6 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
   useEffect(() => {
     listProjects().then(ps => {
       setProjects(ps);
-      // Fetch run counts for all projects in parallel
       ps.forEach(p => {
         getProjectStats(p.id).then(stats => {
           setRunCounts(prev => ({ ...prev, [p.id]: stats.total_runs }));
@@ -176,72 +198,69 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
     setRunCounts(prev => ({ ...prev, [p.id]: 0 }));
   }
 
+  const sidebarBase: React.CSSProperties = {
+    background: SB.bg,
+    borderRight: `1px solid ${SB.border}`,
+    display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0,
+  };
+
   const sidebarStyle: React.CSSProperties = isMobile
     ? {
-        width: 240,
-        position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50,
-        background: 'var(--c-bg-2)', borderRight: '1px solid var(--c-border)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0,
+        ...sidebarBase,
+        width: 240, position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50,
         transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
         transition: 'transform 0.28s cubic-bezier(0.16,1,0.3,1)',
       }
     : {
+        ...sidebarBase,
         width: w, position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 40,
-        background: 'var(--c-bg-2)', borderRight: '1px solid var(--c-border)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0,
       };
 
   const nav = (
     <nav
       style={{
-        flex: 1,
-        overflowY: 'auto', overflowX: 'hidden',
+        flex: 1, overflowY: 'auto', overflowX: 'hidden',
         display: 'flex', flexDirection: 'column',
-        scrollbarWidth: 'none',
+        scrollbarWidth: 'none', padding: '8px 0 4px',
       }}
     >
       {/* ── Main navigation ───────────────────────────────────── */}
-      <div style={{ padding: '6px 6px 0' }}>
-        <NavItem to="/app/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
-        <NavItem to="/app/generate"  icon={Sparkles}        label="Generate Tests" collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
-        <NavItem to="/app/review"    icon={ClipboardCheck}  label="Review"         collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
-        <NavItem to="/app/test-cases" icon={ListChecks}     label="Test Cases"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
-        <NavItem to="/app/validation" icon={CheckCircle2}   label="Validation"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
-        <NavItem to="/app/traceability" icon={GitBranch}    label="Traceability"   collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
-        <NavItem to="/app/runs"      icon={PlayCircle}      label="Runs"           collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+      <div style={{ padding: '0 8px' }}>
+        {!effectiveCollapsed && (
+          <div style={{
+            fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: SB.textDim,
+            padding: '4px 8px 6px',
+          }}>
+            Platform
+          </div>
+        )}
+        <NavItem to="/app/dashboard"    icon={LayoutDashboard} label="Dashboard"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/generate"     icon={Sparkles}        label="Generate Tests" collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/review"       icon={ClipboardCheck}  label="Review"         collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/test-cases"   icon={ListChecks}      label="Test Cases"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/validation"   icon={CheckCircle2}    label="Validation"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/traceability" icon={GitBranch}       label="Traceability"   collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/runs"         icon={PlayCircle}      label="Runs"           collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
       </div>
 
       {/* ── Divider ───────────────────────────────────────────── */}
-      <div style={{ height: 1, background: 'var(--c-border)', margin: '8px 10px' }} />
+      <div style={{ height: 1, background: SB.divider, margin: '10px 12px' }} />
 
-      {/* ── Projects section ──────────────────────────────────── */}
-      <div style={{ padding: '0 6px', flex: 1 }}>
-        {/* Section header */}
+      {/* ── Projects ──────────────────────────────────────────── */}
+      <div style={{ padding: '0 8px', flex: 1 }}>
         <AnimatePresence initial={false}>
           {!effectiveCollapsed ? (
             <motion.div
-              key="projects-header"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              key="ph-full"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '4px 8px 6px',
-              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px 6px' }}
             >
-              <span style={{
-                fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: 'var(--c-text-3)',
-              }}>
+              <span style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: SB.textDim }}>
                 Projects
                 {projects.length > 0 && (
-                  <span style={{
-                    marginLeft: 5, fontSize: '0.6rem', fontWeight: 600,
-                    padding: '1px 5px', borderRadius: 4,
-                    background: 'var(--c-bg)', color: 'var(--c-text-3)',
-                    border: '1px solid var(--c-border)',
-                  }}>
+                  <span style={{ marginLeft: 6, fontSize: '0.6rem', fontWeight: 600, padding: '0px 5px', borderRadius: 4, background: SB.badgeBg, color: SB.textMuted, border: `1px solid ${SB.badgeBorder}` }}>
                     {projects.length}
                   </span>
                 )}
@@ -249,59 +268,25 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
               <button
                 onClick={() => setShowNewProject(true)}
                 title="New Project"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 20, height: 20, borderRadius: 5,
-                  background: 'transparent', border: '1px solid var(--c-border)',
-                  cursor: 'pointer', color: 'var(--c-text-3)',
-                  transition: 'all 0.12s',
-                }}
-                onMouseEnter={e => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.background = 'var(--c-accent-dim)';
-                  el.style.borderColor = 'var(--c-accent-glow)';
-                  el.style.color = 'var(--c-accent)';
-                }}
-                onMouseLeave={e => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.background = 'transparent';
-                  el.style.borderColor = 'var(--c-border)';
-                  el.style.color = 'var(--c-text-3)';
-                }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 5, background: 'transparent', border: `1px solid ${SB.border}`, cursor: 'pointer', color: SB.textMuted, transition: 'all 0.12s' }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = SB.activeBg; el.style.borderColor = SB.activeAccent + '60'; el.style.color = SB.activeAccent; }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.borderColor = SB.border; el.style.color = SB.textMuted; }}
               >
                 <Plus size={11} strokeWidth={2.5} />
               </button>
             </motion.div>
           ) : (
-            /* Collapsed: just the + button */
             <motion.div
-              key="projects-header-collapsed"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 6px' }}
+              key="ph-collapsed"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              style={{ display: 'flex', justifyContent: 'center', padding: '2px 0 6px' }}
             >
               <button
                 onClick={() => setShowNewProject(true)}
                 title="New Project"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 28, height: 28, borderRadius: 7,
-                  background: 'transparent', border: '1px solid var(--c-border)',
-                  cursor: 'pointer', color: 'var(--c-text-3)', transition: 'all 0.12s',
-                }}
-                onMouseEnter={e => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.background = 'var(--c-accent-dim)';
-                  el.style.borderColor = 'var(--c-accent-glow)';
-                  el.style.color = 'var(--c-accent)';
-                }}
-                onMouseLeave={e => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.background = 'transparent';
-                  el.style.borderColor = 'var(--c-border)';
-                  el.style.color = 'var(--c-text-3)';
-                }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 7, background: 'transparent', border: `1px solid ${SB.border}`, cursor: 'pointer', color: SB.textMuted, transition: 'all 0.12s' }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = SB.activeBg; el.style.borderColor = SB.activeAccent + '60'; el.style.color = SB.activeAccent; }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.borderColor = SB.border; el.style.color = SB.textMuted; }}
               >
                 <Plus size={12} strokeWidth={2.5} />
               </button>
@@ -309,28 +294,17 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
           )}
         </AnimatePresence>
 
-        {/* Project list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           {projects.length === 0 ? (
             !effectiveCollapsed && (
               <div
-                style={{
-                  padding: '10px 10px',
-                  borderRadius: 8,
-                  border: '1px dashed var(--c-border)',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                }}
+                style={{ padding: '10px', borderRadius: 8, border: `1px dashed ${SB.border}`, textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s' }}
                 onClick={() => setShowNewProject(true)}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-accent-glow)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--c-border)'; }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = SB.activeAccent + '60'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = SB.border; }}
               >
-                <div style={{ fontSize: '0.75rem', color: 'var(--c-text-3)', lineHeight: 1.5 }}>
-                  No projects yet
-                </div>
-                <div style={{ fontSize: '0.6875rem', color: 'var(--c-accent)', marginTop: 3, fontWeight: 500 }}>
-                  + Create first project
-                </div>
+                <div style={{ fontSize: '0.75rem', color: SB.textMuted, lineHeight: 1.5 }}>No projects yet</div>
+                <div style={{ fontSize: '0.6875rem', color: SB.activeAccent, marginTop: 3, fontWeight: 500 }}>+ Create first project</div>
               </div>
             )
           ) : (
@@ -347,27 +321,13 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
           )}
         </div>
 
-        {/* View all link */}
         {!effectiveCollapsed && projects.length > 0 && (
           <Link
             to="/app/projects"
             onClick={isMobile ? onCloseMobile : undefined}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '7px 10px', borderRadius: 7, marginTop: 4,
-              textDecoration: 'none', fontSize: '0.75rem', fontWeight: 500,
-              color: 'var(--c-text-3)', transition: 'all 0.12s',
-            }}
-            onMouseEnter={e => {
-              const el = e.currentTarget as HTMLElement;
-              el.style.color = 'var(--c-accent)';
-              el.style.background = 'var(--c-accent-dim)';
-            }}
-            onMouseLeave={e => {
-              const el = e.currentTarget as HTMLElement;
-              el.style.color = 'var(--c-text-3)';
-              el.style.background = 'transparent';
-            }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderRadius: 7, marginTop: 4, textDecoration: 'none', fontSize: '0.75rem', fontWeight: 500, color: SB.textMuted, transition: 'all 0.12s' }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = SB.activeAccent; el.style.background = SB.activeBg; }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = SB.textMuted; el.style.background = 'transparent'; }}
           >
             <span>View all projects</span>
             <ChevronRight size={11} />
@@ -379,48 +339,77 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
 
   const SidebarContent = (
     <>
-      {/* Logo */}
+      {/* ── Brand / Logo ─────────────────────────────────────── */}
       <div style={{
-        padding: '0 16px', borderBottom: '1px solid var(--c-border)',
-        flexShrink: 0, height: 57, display: 'flex', alignItems: 'center',
+        padding: effectiveCollapsed ? '11px 0' : '14px 16px 12px',
+        borderBottom: `1px solid ${SB.border}`,
+        background: SB.bgHeader,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: effectiveCollapsed ? 'row' : 'column',
+        alignItems: 'center',
+        justifyContent: effectiveCollapsed ? 'center' : 'flex-start',
+        minHeight: 57,
+        transition: 'padding 0.28s',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 16px rgba(99,102,241,0.4)',
-          }}>
-            <Zap size={15} color="white" fill="white" />
-          </div>
-          <AnimatePresence initial={false}>
-            {!effectiveCollapsed && (
-              <motion.div
-                key="logo-text"
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -8 }}
-                transition={{ duration: 0.18 }}
-                style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}
-              >
-                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--c-text)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-                  Automotive TC Gen
-                </div>
-                <div style={{ fontSize: '0.6rem', color: 'var(--c-text-3)', letterSpacing: '0.08em', marginTop: 2, textTransform: 'uppercase' }}>
-                  ISO 26262
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        <AnimatePresence initial={false} mode="wait">
+          {effectiveCollapsed ? (
+            <motion.img
+              key="logo-icon"
+              src="/logo-removebg-preview.png"
+              alt="GuJ Tech"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.14 }}
+              style={{ width: 50, height: 50, objectFit: 'contain', display: 'block' }}
+            />
+          ) : (
+            <motion.div
+              key="logo-full"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              style={{ width: '100%' }}
+            >
+              <img
+                src="/logo-removebg-preview.png"
+                alt="GuJ Tech"
+                style={{
+                  height: 64, width: 'auto', maxWidth: '100%',
+                  objectFit: 'contain', objectPosition: 'left center',
+                  display: 'block', marginBottom: 9,
+                }}
+              />
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: SB.text, letterSpacing: '-0.01em', lineHeight: 1.3 }}>
+                Automotive TC Gen
+              </div>
+              <div style={{ fontSize: '0.575rem', color: SB.textDim, letterSpacing: '0.1em', marginTop: 3, textTransform: 'uppercase' as const }}>
+                ISO 26262 / ASIL-aware
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Scrollable nav + projects */}
+      {/* ── Nav ─────────────────────────────────────────────── */}
       {nav}
 
-      {/* Bottom: Settings + Collapse */}
-      <div style={{ padding: '6px 6px 12px', borderTop: '1px solid var(--c-border)', flexShrink: 0 }}>
-        <NavItem to="/app/settings" icon={Settings} label="Settings" collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+      {/* ── Bottom ───────────────────────────────────────────── */}
+      <div style={{
+        padding: '6px 8px 10px',
+        borderTop: `1px solid ${SB.border}`,
+        background: SB.bgHeader,
+        flexShrink: 0,
+      }}>
+        <NavItem
+          to="/app/settings"
+          icon={Settings}
+          label="Settings"
+          collapsed={effectiveCollapsed}
+          onNavigate={isMobile ? onCloseMobile : undefined}
+        />
         {!isMobile && (
           <button
             onClick={() => onCollapse(!collapsed)}
@@ -428,16 +417,16 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
             style={{
               width: '100%', display: 'flex', alignItems: 'center',
               justifyContent: collapsed ? 'center' : 'space-between',
-              padding: collapsed ? '9px 0' : '8px 12px', marginTop: 4,
+              padding: collapsed ? '8px 0' : '7px 10px', marginTop: 2,
               background: 'transparent', border: 'none', cursor: 'pointer',
-              color: 'var(--c-text-3)', borderRadius: 8,
+              color: SB.textMuted, borderRadius: 7,
               fontSize: '0.75rem', fontWeight: 500, transition: 'all 0.15s ease',
             }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--c-accent-dim)'; el.style.color = 'var(--c-accent)'; }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = 'var(--c-text-3)'; }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = SB.hover; el.style.color = SB.text; }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = SB.textMuted; }}
           >
             {!collapsed && <span>Collapse</span>}
-            {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>
         )}
       </div>
@@ -483,7 +472,9 @@ function ProjectRow({
   collapsed: boolean;
   onNavigate?: () => void;
 }) {
+  const location = useLocation();
   const lastActive = formatRelativeShort(project.last_run_at ?? project.updated_at);
+  const isActive = location.pathname === '/app/projects';
 
   if (collapsed) {
     return (
@@ -491,18 +482,11 @@ function ProjectRow({
         to="/app/projects"
         onClick={onNavigate}
         title={project.name}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '5px 0', borderRadius: 7, textDecoration: 'none',
-          transition: 'background 0.12s',
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--c-bg)'; }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px 0', borderRadius: 7, textDecoration: 'none', transition: 'background 0.12s' }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = SB.hover; }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
       >
-        <span style={{
-          width: 8, height: 8, borderRadius: '50%', background: color,
-          flexShrink: 0, boxShadow: `0 0 5px ${color}60`,
-        }} />
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
       </Link>
     );
   }
@@ -511,101 +495,87 @@ function ProjectRow({
     <NavLink
       to="/app/projects"
       onClick={onNavigate}
-      style={({ isActive }) => ({
+      style={{
         display: 'flex', alignItems: 'center', gap: 9,
-        padding: '6px 10px', borderRadius: 8, textDecoration: 'none',
+        padding: '5px 10px', borderRadius: 8, textDecoration: 'none',
         transition: 'background 0.12s',
-        background: isActive ? 'var(--c-accent-dim)' : 'transparent',
-      })}
-      onMouseEnter={e => {
-        const el = e.currentTarget as HTMLElement;
-        if (!el.dataset.active) el.style.background = 'var(--c-bg)';
+        background: isActive ? SB.activeBg : 'transparent',
       }}
-      onMouseLeave={e => {
-        const el = e.currentTarget as HTMLElement;
-        if (!el.dataset.active) el.style.background = 'transparent';
-      }}
+      onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = SB.hover; }}
+      onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
     >
-      {/* Color dot */}
-      <span style={{
-        width: 8, height: 8, borderRadius: '50%', background: color,
-        flexShrink: 0, boxShadow: `0 0 5px ${color}50`,
-      }} />
-
-      {/* Name */}
-      <span style={{
-        flex: 1, fontSize: '0.8125rem', fontWeight: 500, color: 'var(--c-text-2)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        minWidth: 0,
-      }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span style={{ flex: 1, fontSize: '0.8rem', fontWeight: 500, color: SB.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
         {project.name}
       </span>
-
-      {/* Right: run count or last active */}
-      <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ flexShrink: 0 }}>
         {runCount !== null ? (
-          <span style={{
-            fontSize: '0.65rem', fontWeight: 600,
-            padding: '1px 5px', borderRadius: 4,
-            background: 'var(--c-bg)', border: '1px solid var(--c-border)',
-            color: 'var(--c-text-3)',
-          }}>
+          <span style={{ fontSize: '0.625rem', fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: SB.badgeBg, border: `1px solid ${SB.badgeBorder}`, color: SB.textMuted }}>
             {runCount}
           </span>
         ) : lastActive ? (
-          <span style={{ fontSize: '0.65rem', color: 'var(--c-text-3)' }}>
-            {lastActive}
-          </span>
+          <span style={{ fontSize: '0.625rem', color: SB.textDim }}>{lastActive}</span>
         ) : null}
       </span>
     </NavLink>
   );
 }
 
-// ─── Nav Item ──────────────────────────────────────────────────────────────────
+// ─── Nav Item ─────────────────────────────────────────────────────────────────
 
 interface NavItemProps {
   to: string;
-  icon: ComponentType<{ size?: number; strokeWidth?: number }>;
+  icon: ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
   label: string;
   collapsed: boolean;
   onNavigate?: () => void;
 }
 
 function NavItem({ to, icon: Icon, label, collapsed, onNavigate }: NavItemProps) {
+  const location = useLocation();
+  const isActive = location.pathname === to || location.pathname.startsWith(to + '/');
+
   return (
     <NavLink
       to={to}
       title={collapsed ? label : undefined}
       onClick={onNavigate}
-      style={({ isActive }) => ({
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: collapsed ? '9px 0' : '8px 10px',
+      style={{
+        display: 'flex', alignItems: 'center',
+        gap: 10,
+        padding: collapsed ? '9px 0' : '7px 10px',
         justifyContent: collapsed ? 'center' : 'flex-start',
-        borderRadius: 8, textDecoration: 'none',
-        fontSize: '0.8125rem', fontWeight: 500,
+        borderRadius: 7,
+        textDecoration: 'none',
+        fontSize: '0.8125rem',
+        fontWeight: isActive ? 600 : 400,
         whiteSpace: 'nowrap', overflow: 'hidden',
-        transition: 'all 0.15s ease',
-        background: isActive ? 'var(--c-accent-dim)' : 'transparent',
-        color: isActive ? 'var(--c-accent)' : 'var(--c-text-2)',
-        boxShadow: isActive && !collapsed ? 'inset 2px 0 0 var(--c-accent)' : 'none',
-      })}
+        transition: 'background 0.12s, color 0.12s',
+        background: isActive ? SB.activeBg : 'transparent',
+        color: isActive ? SB.activeText : SB.textMuted,
+        boxShadow: isActive && !collapsed ? `inset 2px 0 0 ${SB.activeAccent}` : 'none',
+        marginBottom: 1,
+      }}
       onMouseEnter={e => {
-        const el = e.currentTarget as HTMLElement;
-        if (!el.getAttribute('aria-current')) {
-          el.style.background = 'var(--c-bg)';
-          el.style.color = 'var(--c-text)';
+        if (!isActive) {
+          const el = e.currentTarget as HTMLElement;
+          el.style.background = SB.hover;
+          el.style.color = SB.text;
         }
       }}
       onMouseLeave={e => {
-        const el = e.currentTarget as HTMLElement;
-        if (!el.getAttribute('aria-current')) {
-          el.style.background = '';
-          el.style.color = '';
+        if (!isActive) {
+          const el = e.currentTarget as HTMLElement;
+          el.style.background = 'transparent';
+          el.style.color = SB.textMuted;
         }
       }}
     >
-      <Icon size={16} strokeWidth={1.75} />
+      <Icon
+        size={15}
+        strokeWidth={isActive ? 2 : 1.75}
+        color={isActive ? SB.activeAccent : 'currentColor'}
+      />
       <AnimatePresence initial={false}>
         {!collapsed && (
           <motion.span

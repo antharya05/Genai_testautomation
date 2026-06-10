@@ -6,6 +6,7 @@ python-docx
 python-dotenv
 anthropic
 groq
+google-generativeai
 pydantic
 openpyxl
 # RAG dependencies
