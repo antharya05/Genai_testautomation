@@ -27,18 +27,26 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from embeddings.sentence_transformer import EmbeddingModel, get_embedding_model
-from vectorstore.chroma_store import ChromaVectorStore
-from retrievers.chroma_retriever import ChromaRetriever
-
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 CHUNK_MIN_LEN = 50
 
 
+def rag_enabled() -> bool:
+    """RAG is opt-out via env var (default on for local dev).
+
+    Set RAG_ENABLED=false on resource-constrained hosts (e.g. Render free tier)
+    so the heavy chromadb/sentence-transformers/torch stack is never imported,
+    instantiated, or downloaded. Mirrors the PROVIDER env-var toggle pattern.
+    """
+    return os.getenv("RAG_ENABLED", "true").strip().lower() not in ("false", "0", "no")
+
+
 def _load_and_chunk(knowledge_dir: Path) -> list[dict]:
     """Load all .md files, split into paragraph chunks, return list of chunk dicts."""
+    from vectorstore.chroma_store import ChromaVectorStore
+
     chunks = []
     for md_file in sorted(knowledge_dir.glob("*.md")):
         try:
@@ -67,9 +75,12 @@ class RAGPipeline:
     """Singleton RAG pipeline. Initialize once at startup, use throughout app lifetime."""
 
     def __init__(self) -> None:
-        self._store = ChromaVectorStore()
-        self._embedder: Optional[EmbeddingModel] = None
-        self._retriever: Optional[ChromaRetriever] = None
+        # Heavy objects are created lazily in initialize() so that importing this
+        # module never pulls in chromadb / sentence-transformers / torch. When
+        # RAG_ENABLED=false these stay None and the pipeline is a no-op.
+        self._store = None
+        self._embedder = None
+        self._retriever = None
         self._ready = False
 
     async def initialize(self) -> None:
@@ -81,10 +92,21 @@ class RAGPipeline:
         if self._ready:
             return
 
+        if not rag_enabled():
+            logger.info("RAG disabled (RAG_ENABLED=false) — skipping pipeline init.")
+            return
+
+        # Lazy imports: only required when RAG is actually enabled.
+        from embeddings.sentence_transformer import get_embedding_model
+        from vectorstore.chroma_store import ChromaVectorStore
+        from retrievers.chroma_retriever import ChromaRetriever
+
         import asyncio
         loop = asyncio.get_event_loop()
 
         try:
+            self._store = ChromaVectorStore()
+
             # Load embedding model (may download on first run)
             self._embedder = get_embedding_model()
 

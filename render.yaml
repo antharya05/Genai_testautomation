@@ -1,0 +1,30 @@
+# Render blueprint — deploys the FastAPI backend.
+# RAG is disabled here so the build skips the heavy torch/chromadb stack and the
+# service fits the free tier. Flip RAG_ENABLED=true (and switch to a plan with
+# more memory) to enable retrieval-augmented generation.
+services:
+  - type: web
+    name: testgen-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: RAG_ENABLED
+        value: "false"
+      - key: PROVIDER
+        value: anthropic
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-6
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      # Provision a Render PostgreSQL instance and paste its Internal URL here,
+      # or leave unset to fall back to ephemeral SQLite (lost on redeploy).
+      - key: DATABASE_URL
+        sync: false

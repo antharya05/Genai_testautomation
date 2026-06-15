@@ -26,8 +26,6 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-import fitz
-from docx import Document
 from fastapi import BackgroundTasks, FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
@@ -35,7 +33,8 @@ from fastapi.responses import Response, StreamingResponse
 from database import Base, SessionLocal, engine
 import db_models  # noqa: F401 — registers all ORM tables with Base
 from models import ExportRequest, GenerateRequest, ProviderKeyRequest, TextRequest
-from parser import parse_requirements
+from parsing import parse_document, parse_text
+from providers import get_provider_from_db
 from prompts.manager import get_current_version
 from services import exporter
 from services.db_service import (
@@ -62,7 +61,7 @@ from services.db_service import (
     update_project,
 )
 from services.generator import run_batch
-from services.rag import rag_pipeline
+from services.rag import rag_enabled, rag_pipeline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,9 +88,15 @@ async def lifespan(app: FastAPI):
     logger.info("Database ready.")
 
     # ── 2. RAG pipeline ──────────────────────────────────────────
-    logger.info("Initializing RAG pipeline...")
-    await rag_pipeline.initialize()
-    logger.info("RAG pipeline ready. Server accepting requests.")
+    # Opt-out via RAG_ENABLED=false (e.g. Render free tier) so the heavy
+    # chromadb/sentence-transformers/torch stack is never loaded. The pipeline
+    # then degrades gracefully to deterministic, non-RAG generation.
+    if rag_enabled():
+        logger.info("Initializing RAG pipeline...")
+        await rag_pipeline.initialize()
+        logger.info("RAG pipeline ready. Server accepting requests.")
+    else:
+        logger.info("RAG disabled (RAG_ENABLED=false). Skipping pipeline init — server accepting requests.")
 
     yield
     logger.info("Server shutting down.")
@@ -117,29 +122,24 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 _jobs: dict[str, dict] = {}
 
-ALLOWED_EXTENSIONS = (".pdf", ".docx", ".txt")
+# Formats the multi-stage parsing pipeline can ingest deterministically.
+ALLOWED_EXTENSIONS = (".pdf", ".docx", ".xlsx", ".xlsm", ".csv", ".txt", ".md", ".markdown")
 
 
-# ─────────────────────────────────────────────
-# Text extractors
-# ─────────────────────────────────────────────
+def _resolve_llm_provider():
+    """Resolve the BYOK provider for the parser's LLM fallback (Stage 8).
 
-def _extract_pdf(path: str) -> str:
-    doc = fitz.open(path)
-    return "".join(page.get_text() for page in doc)
-
-
-def _extract_docx(path: str) -> str:
-    doc = Document(path)
-    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-
-
-def _extract_txt(path: str) -> str:
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        return fh.read()
-
-
-_EXTRACTORS = {".pdf": _extract_pdf, ".docx": _extract_docx, ".txt": _extract_txt}
+    Returns None when no provider is configured — the pipeline then stays fully
+    deterministic instead of erroring.
+    """
+    db = SessionLocal()
+    try:
+        return get_provider_from_db(db)
+    except Exception as exc:
+        logger.warning("No LLM provider available for parser fallback: %s", exc)
+        return None
+    finally:
+        db.close()
 
 
 # ─────────────────────────────────────────────
@@ -188,38 +188,55 @@ def health():
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename.lower())[1]
-    if ext not in _EXTRACTORS:
-        return {"error": f"Unsupported type '{ext}'. Allowed: {', '.join(_EXTRACTORS)}"}
+    if ext not in ALLOWED_EXTENSIONS:
+        return {"error": f"Unsupported type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}
 
     save_path = os.path.join(UPLOAD_FOLDER, file.filename)
     with open(save_path, "wb") as buf:
         shutil.copyfileobj(file.file, buf)
 
     try:
-        text = _EXTRACTORS[ext](save_path)
-        requirements = parse_requirements(text)
+        result = parse_document(
+            save_path,
+            filename=file.filename,
+            provider=_resolve_llm_provider(),
+        )
     except Exception as exc:
         logger.error("Extraction failed: %s", exc)
         return {"error": f"Extraction failed: {exc}"}
 
+    requirements = result.as_strings()
     return {
         "filename": file.filename,
-        "extracted_text": text,
+        # `requirements` stays a list[str] for backward compatibility.
         "requirements": requirements,
         "requirement_count": len(requirements),
+        # Additive: rich multi-stage parse metadata.
+        "document_type": result.document_type.value,
+        "parser_used": result.parser_used,
+        "confidence": result.confidence,
+        "issues": result.issues,
+        "parsed": [r.to_dict() for r in result.requirements],
     }
 
 
 @app.post("/parse-text")
-async def parse_text(request: TextRequest):
+async def parse_text_endpoint(request: TextRequest):
     if not request.text or not request.text.strip():
         return {"error": "No text provided", "requirements": []}
-    requirements = parse_requirements(request.text)
+
+    result = parse_text(request.text, provider=_resolve_llm_provider())
+    requirements = result.as_strings()
     return {
         "filename": "Pasted Text",
         "extracted_text": request.text,
         "requirements": requirements,
         "requirement_count": len(requirements),
+        "document_type": result.document_type.value,
+        "parser_used": result.parser_used,
+        "confidence": result.confidence,
+        "issues": result.issues,
+        "parsed": [r.to_dict() for r in result.requirements],
     }
 
 
@@ -227,13 +244,23 @@ async def parse_text(request: TextRequest):
 # Generation — async job + SSE streaming
 # ─────────────────────────────────────────────
 
-async def _run_and_persist(requirements: list[str], job_id: str, provider=None) -> None:
+def _parsed_text_key(p: dict) -> str:
+    """Reproduce ParsedRequirement.as_text() so structured parser records can be
+    correlated to the flattened requirement strings generation receives."""
+    stmt = (p.get("statement") or "").strip()
+    rid = (p.get("requirement_id") or "").strip()
+    return f"{rid}: {stmt}".strip() if rid else stmt
+
+
+async def _run_and_persist(
+    requirements: list[str], job_id: str, provider=None, parsed_meta: dict | None = None
+) -> None:
     """
     Wraps run_batch with DB persistence.
     run_batch streams incremental progress into _jobs[job_id].
     After completion this function writes the final state to the DB.
     """
-    await run_batch(requirements, job_id, _jobs, provider=provider)
+    await run_batch(requirements, job_id, _jobs, provider=provider, parsed_meta=parsed_meta)
 
     db = SessionLocal()
     try:
@@ -300,7 +327,20 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
         "error": None,
     }
 
-    background_tasks.add_task(_run_and_persist, request.requirements, job_id, provider_instance)
+    # Correlate optional structured parser metadata to the requirement strings.
+    # Keyed by the flattened "id: statement" text so reordering/editing/omission
+    # on the client all degrade gracefully to the legacy string-only path.
+    parsed_meta = None
+    if request.parsed:
+        parsed_meta = {}
+        for p in request.parsed:
+            key = _parsed_text_key(p)
+            if key:
+                parsed_meta[key] = p
+
+    background_tasks.add_task(
+        _run_and_persist, request.requirements, job_id, provider_instance, parsed_meta
+    )
     return {"job_id": job_id, "total": len(request.requirements)}
 
 

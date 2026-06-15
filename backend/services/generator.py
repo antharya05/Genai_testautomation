@@ -27,6 +27,7 @@ asyncio.gather runs all requirement tasks concurrently within the semaphore limi
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -70,15 +71,38 @@ def _preserve_requirement_id(cases: list, req_id: str) -> None:
         tc.requirement_id = req_id
 
 
+def _preserve_asil(cases: list, meta: dict) -> None:
+    """Force the deterministically-resolved ASIL onto every case.
+
+    ASIL is resolved in ``requirement_analyzer.extract_metadata`` (stated in the
+    document → "requirement", else content-estimated → "estimated"). That value
+    is authoritative over the LLM's per-case guess, guaranteeing a single
+    consistent ASIL — and an honest source — across all cases for a requirement.
+    """
+    asil = meta.get("asil", "QM")
+    source = meta.get("asil_source", "estimated")
+    confidence = int(meta.get("asil_confidence", 100))
+    for tc in cases:
+        tc.asil = asil
+        tc.asil_source = source
+        tc.asil_confidence = confidence
+
+
 async def _generate_one(
     requirement: str,
     tc_offset: int,
     prompt_version: str,
     provider=None,
+    parsed: Optional[dict] = None,
 ) -> tuple[list, int, list[dict], dict]:
     """
     Generate test cases for a single requirement.
     Returns (test_cases, retry_count, rag_chunks, coverage_report).
+
+    ``parsed`` is the optional ``ParsedRequirement.to_dict()`` record for this
+    requirement. When present, structured parser fields (requirement_id, asil,
+    category, …) are authoritative; when absent the legacy string-only path runs
+    unchanged.
     """
     from prompts.manager import get_prompt
     from providers import get_provider
@@ -88,16 +112,26 @@ async def _generate_one(
     from services.rag import rag_pipeline
 
     # ── Deterministic metadata extraction (no LLM, cannot hallucinate) ──
-    meta = analyzer.extract_metadata(requirement)
+    meta = analyzer.extract_metadata(requirement, parsed=parsed)
     req_id = meta["requirement_id"]
 
+    # ── Facts block (built up-front so it can also key the cache) ──
+    # Structured parser metadata changes the prompt for the same requirement
+    # text, so it must take part in the cache key to avoid stale plain-text hits.
+    facts_block = analyzer.format_metadata_block(meta)
+    cache_version = prompt_version
+    if parsed:
+        sig = hashlib.sha256(facts_block.encode("utf-8")).hexdigest()[:8]
+        cache_version = f"{prompt_version}:{sig}"
+
     # ── Cache check ──────────────────────────────────────────────
-    cached = cache.get(requirement, prompt_version)
+    cached = cache.get(requirement, cache_version)
     if cached:
         cases, warnings = validator.validate_batch(cached, req_id=req_id, offset=tc_offset)
         for i, tc in enumerate(cases):
             tc.test_id = f"TC_{tc_offset + i + 1:03d}"
         _preserve_requirement_id(cases, req_id)
+        _preserve_asil(cases, meta)
         coverage = validator.validate_coverage(cases, meta)
         return cases, 0, [], coverage
 
@@ -109,7 +143,6 @@ async def _generate_one(
     user_msg, rag_chunks = rag_pipeline.build_enriched_prompt(requirement)
 
     # ── Prepend authoritative extracted facts (anti-hallucination) ──
-    facts_block = analyzer.format_metadata_block(meta)
     user_msg = f"{facts_block}\n\n{'=' * 60}\n\n{user_msg}"
 
     # ── LLM call with retry ───────────────────────────────────────
@@ -149,6 +182,8 @@ async def _generate_one(
 
             # ── Requirement ID preservation (authoritative regex id) ──
             _preserve_requirement_id(cases, req_id)
+            # ── ASIL preservation (authoritative resolved ASIL) ───
+            _preserve_asil(cases, meta)
 
             # ── Post-generation coverage validation ───────────────
             coverage = validator.validate_coverage(cases, meta)
@@ -156,7 +191,7 @@ async def _generate_one(
                 logger.info("Coverage findings for %s: %s", req_id, coverage["warnings"])
 
             # ── Cache the result ──────────────────────────────────
-            cache.set(requirement, prompt_version, [tc.model_dump() for tc in cases])
+            cache.set(requirement, cache_version, [tc.model_dump() for tc in cases])
             return cases, attempt, rag_chunks, coverage
 
         except Exception as exc:
@@ -169,17 +204,27 @@ async def _generate_one(
     return [], MAX_RETRIES, [], validator.validate_coverage([], meta)
 
 
-async def run_batch(requirements: list[str], job_id: str, jobs: dict, provider=None) -> None:
+async def run_batch(
+    requirements: list[str],
+    job_id: str,
+    jobs: dict,
+    provider=None,
+    parsed_meta: Optional[dict] = None,
+) -> None:
     """
     Process all requirements concurrently and stream results via jobs dict.
     The SSE endpoint reads jobs[job_id] every 400ms to stream progress to frontend.
+
+    ``parsed_meta`` optionally maps a requirement string (the flattened
+    ``"id: statement"`` text) to its ``ParsedRequirement.to_dict()`` record, so
+    structured parser metadata flows into generation. ``None`` keeps the legacy
+    list[str]-only behaviour for raw-text / backward-compatible callers.
     """
     from prompts.manager import get_current_version
-    from services.dedup import is_duplicate
+    from services.dedup import deduplicate
 
     prompt_version = get_current_version()
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
-    seen_titles: list[str] = []
     tc_offset = 0
 
     jobs[job_id].setdefault("coverage", [])
@@ -187,24 +232,26 @@ async def run_batch(requirements: list[str], job_id: str, jobs: dict, provider=N
     async def process(req: str, idx: int) -> None:
         nonlocal tc_offset
         async with semaphore:
+            parsed = parsed_meta.get(req) if parsed_meta else None
             cases, retries, rag_chunks, coverage = await _generate_one(
-                req, tc_offset, prompt_version, provider
+                req, tc_offset, prompt_version, provider, parsed=parsed
             )
             tc_offset += len(cases)
 
-            unique = []
-            for tc in cases:
-                if not is_duplicate(tc.title, seen_titles):
-                    seen_titles.append(tc.title)
-                    unique.append(tc)
+            # Deduplicate WITHIN this requirement only. Each process() call owns
+            # exactly one requirement's cases, so there is no cross-requirement
+            # state — boundary/timing/safety/etc. variants are preserved, and a
+            # case is dropped only when it genuinely repeats another (same slot
+            # + near-identical steps/expected results), never on title alone.
+            unique, removed = deduplicate(cases)
 
             jobs[job_id]["current"] = idx + 1
             jobs[job_id]["test_cases"].extend([tc.model_dump() for tc in unique])
             jobs[job_id]["rag_enabled"] = True
             jobs[job_id]["coverage"].append({"requirement_index": idx, **coverage})
             logger.info(
-                "Req %d/%d done — %d cases, %d RAG chunks, %d retries, %d coverage warnings",
-                idx + 1, len(requirements), len(unique), len(rag_chunks), retries,
+                "Req %d/%d done — %d cases (%d dup removed), %d RAG chunks, %d retries, %d coverage warnings",
+                idx + 1, len(requirements), len(unique), removed, len(rag_chunks), retries,
                 len(coverage.get("warnings", [])),
             )
 

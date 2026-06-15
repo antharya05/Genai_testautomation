@@ -33,12 +33,39 @@ export interface TestCase {
   reviewed_at?: string;
 }
 
+// Rich, deterministic parser output (mirrors backend ParsedRequirement.to_dict()).
+// Optional fields are present only when the parser populated them.
+export interface ParsedRequirement {
+  requirement_id: string | null;
+  title: string | null;
+  statement: string;
+  description: string | null;
+  area: string | null;
+  asil: string | null;
+  test_focus: string | null;
+  entities: string[];
+  thresholds: string[];
+  units: string[];
+  timing_constraints: string[];
+  logical_operators: string[];
+  category: string;
+  source: string;
+  confidence: number;
+}
+
 export interface UploadResult {
   filename: string;
   extracted_text: string;
   requirements: string[];
   requirement_count: number;
   error?: string;
+  // Additive multi-stage parse metadata. Absent for legacy/demo inputs, in
+  // which case generation falls back to string-only mode.
+  parsed?: ParsedRequirement[];
+  parser_used?: string;
+  confidence?: number;
+  issues?: string[];
+  document_type?: string;
 }
 
 export interface JobStatus {

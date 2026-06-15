@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { ActiveProvider, JobStatus, Project, ProjectStats, ProviderConfig, Run, TestCase, UploadResult } from "../types";
+import type { ActiveProvider, JobStatus, ParsedRequirement, Project, ProjectStats, ProviderConfig, Run, TestCase, UploadResult } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -32,11 +32,24 @@ export async function parseText(text: string): Promise<UploadResult> {
 export async function startGeneration(
   requirements: string[],
   projectId?: string,
+  parsed?: ParsedRequirement[],
 ): Promise<{ job_id: string; total: number }> {
-  const res = await api.post<{ job_id: string; total: number }>("/generate", {
+  const body: {
+    requirements: string[];
+    project_id: string | null;
+    parsed?: ParsedRequirement[];
+  } = {
     requirements,
     project_id: projectId ?? null,
-  });
+  };
+  // Only include `parsed` when we actually have it, so legacy/demo inputs keep
+  // the original string-only request shape and backend behaviour.
+  if (parsed && parsed.length > 0) {
+    body.parsed = parsed;
+  }
+  // TEMP debug: how many structured records are we sending to /generate?
+  console.debug("[bridge] startGeneration → parsed count:", parsed?.length ?? 0);
+  const res = await api.post<{ job_id: string; total: number }>("/generate", body);
   return res.data;
 }
 

@@ -72,7 +72,7 @@ _SNAKE_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
 _QUOTED_RE = re.compile(r"[\"']([^\"']{2,40})[\"']")
 
 # Acronyms that are units or generic words, not entities worth listing.
-_ACRONYM_STOPWORDS = {"THE", "AND", "OR", "NOT", "SHALL", "MUST", "ID", "OK"}
+_ACRONYM_STOPWORDS = {"THE", "AND", "OR", "NOT", "SHALL", "MUST", "ID", "OK", "ASIL", "QM"}
 
 
 def extract_requirement_id(text: str) -> str:
@@ -164,7 +164,7 @@ def numeric_tokens(text: str) -> set[str]:
     return toks
 
 
-def extract_metadata(text: str) -> dict:
+def extract_metadata(text: str, parsed: dict | None = None) -> dict:
     """
     Extract the full deterministic fact set for one requirement.
 
@@ -172,25 +172,98 @@ def extract_metadata(text: str) -> dict:
     thresholds (values annotated with their comparison operator), timings,
     units, operators, logical_operators, entities, and numeric_tokens (the
     normalised allowed-value whitelist).
+
+    When ``parsed`` (a ``ParsedRequirement.to_dict()`` record) is supplied, the
+    structured parser fields become authoritative: the requirement id and ASIL
+    come straight from the parser (e.g. a table column), category/title/area/
+    test_focus context is carried through, and numeric/entity extraction scans
+    the full requirement context (statement + description + test focus) instead
+    of just the flattened ``"id: statement"`` line — recovering values that live
+    in a Description or Test Focus column. With ``parsed=None`` the behaviour is
+    byte-for-byte identical to the original string-only contract.
     """
     text = text or ""
-    values = _extract_value_units(text)
+    # Scan the richer context when structured metadata is available.
+    if parsed:
+        scan_text = " ".join(
+            p for p in (
+                (parsed.get("statement") or text),
+                (parsed.get("description") or ""),
+                (parsed.get("test_focus") or ""),
+            ) if p
+        )
+    else:
+        scan_text = text
+
+    values = _extract_value_units(scan_text)
     thresholds = [
         {"raw": v["raw"], "value": v["value"], "unit": v["unit"],
-         "operator": _nearest_operator(text, v["start"])}
+         "operator": _nearest_operator(scan_text, v["start"])}
         for v in values
     ]
-    return {
+    # ASIL is resolved deterministically: a parser-supplied ASIL column wins,
+    # then an ASIL stated inline in the text → "requirement", otherwise
+    # content-estimated → "estimated" (with a confidence score).
+    from services import asil as asil_resolver
+    parsed_asil = parsed.get("asil") if parsed else None
+    asil_info = asil_resolver.resolve_asil(scan_text, parsed_asil=parsed_asil)
+
+    meta = {
         "requirement_id": extract_requirement_id(text),
         "values": values,
         "thresholds": thresholds,
         "timings": [v for v in values if _is_time_unit(v["unit"])],
         "units": _ordered_unique(v["unit"] for v in values),
-        "operators": _extract_operators(text),
-        "logical_operators": _extract_logical_operators(text),
-        "entities": _extract_entities(text),
-        "numeric_tokens": numeric_tokens(text),
+        "operators": _extract_operators(scan_text),
+        "logical_operators": _extract_logical_operators(scan_text),
+        "entities": _extract_entities(scan_text),
+        "numeric_tokens": numeric_tokens(scan_text),
+        "asil": asil_info["asil"],
+        "asil_source": asil_info["asil_source"],
+        "asil_confidence": asil_info["asil_confidence"],
+        # Structured context — populated only from parser metadata.
+        "category": None,
+        "title": None,
+        "description": None,
+        "area": None,
+        "test_focus": None,
+        "timing_constraints": [],
     }
+    if parsed:
+        _merge_parsed(meta, parsed)
+    return meta
+
+
+def _merge_parsed(meta: dict, parsed: dict) -> None:
+    """Overlay authoritative parser fields onto a freshly-extracted meta dict.
+
+    The parser's requirement id is preferred because it recognises more id
+    prefixes (SAF, HSR, FSR, PERF, SR …) than the generation-side regex and
+    pulls it from a dedicated column when the document is tabular. Qualitative
+    metadata (entities/units/logical operators) is *unioned* with what we
+    re-derived so the parser's domain-aware values augment rather than replace.
+    """
+    pid = (parsed.get("requirement_id") or "").strip()
+    if pid:
+        meta["requirement_id"] = pid.rstrip(".:,)").upper()
+
+    meta["category"] = (parsed.get("category") or "").strip() or None
+    meta["title"] = (parsed.get("title") or "").strip() or None
+    meta["description"] = (parsed.get("description") or "").strip() or None
+    meta["area"] = (parsed.get("area") or "").strip() or None
+    meta["test_focus"] = (parsed.get("test_focus") or "").strip() or None
+
+    meta["entities"] = _ordered_unique(
+        [*meta["entities"], *(parsed.get("entities") or [])]
+    )[:20]
+    meta["units"] = _ordered_unique([*meta["units"], *(parsed.get("units") or [])])
+    meta["logical_operators"] = _ordered_unique(
+        [*meta["logical_operators"],
+         *[str(o).upper() for o in (parsed.get("logical_operators") or [])]]
+    )
+    meta["timing_constraints"] = _ordered_unique(
+        [str(t) for t in (parsed.get("timing_constraints") or []) if str(t).strip()]
+    )
 
 
 def format_metadata_block(meta: dict) -> str:
@@ -201,6 +274,17 @@ def format_metadata_block(meta: dict) -> str:
     lines = ["EXTRACTED REQUIREMENT FACTS — authoritative. Use ONLY these values."]
     lines.append(f"- Requirement ID: {meta['requirement_id']} "
                  f"(every generated test case MUST carry this exact requirement_id)")
+
+    asil = meta.get("asil", "QM")
+    asil_source = meta.get("asil_source", "estimated")
+    if asil_source == "requirement":
+        lines.append(f"- ASIL: {asil} (stated in the requirement — authoritative). "
+                     f'Set "asil" to exactly "{asil}" on EVERY generated test case.')
+    else:
+        lines.append(f"- ASIL: {asil} (estimated from requirement content). "
+                     f'Set "asil" to exactly "{asil}" on EVERY generated test case.')
+    lines.append(f"  → Generate test coverage at the DEPTH required for ASIL {asil} "
+                 f"per the ASIL COVERAGE RULES above.")
 
     if meta["values"]:
         vals = ", ".join(v["raw"] for v in meta["values"])
@@ -229,4 +313,39 @@ def format_metadata_block(meta: dict) -> str:
         lines.append(f"- Named entities/signals (reference only those listed; do not invent "
                      f"signals or CAN IDs): {', '.join(meta['entities'])}")
 
+    # ── Category-driven test-type emphasis (parser metadata, optional) ──
+    category = meta.get("category")
+    if category:
+        guidance = _CATEGORY_TEST_GUIDANCE.get(category)
+        line = f"- Requirement category: {category}"
+        if guidance:
+            line += f" → {guidance}"
+        lines.append(line)
+
+    # ── Requirement context (intent only — never a source of new values) ──
+    context_bits = []
+    if meta.get("title"):
+        context_bits.append(f"Title: {meta['title']}")
+    if meta.get("area"):
+        context_bits.append(f"Area/module: {meta['area']}")
+    if meta.get("test_focus"):
+        context_bits.append(f"Intended test focus: {meta['test_focus']}")
+    if meta.get("timing_constraints"):
+        context_bits.append(f"Timing constraints: {', '.join(meta['timing_constraints'])}")
+    if context_bits:
+        lines.append("- Requirement context (use for intent/coverage only; do NOT "
+                     "introduce any numeric value not listed above):")
+        lines.extend(f"    • {b}" for b in context_bits)
+
     return "\n".join(lines)
+
+
+# Category → which test types to emphasise. Keeps the model's coverage aligned
+# with the requirement's nature when the parser classified it.
+_CATEGORY_TEST_GUIDANCE: dict[str, str] = {
+    "safety": "emphasise safety, fault_injection, and recovery test types.",
+    "performance": "emphasise timing and stress test types.",
+    "interface": "emphasise protocol/signal validation — message framing, "
+                 "signal range, and bus error handling.",
+    "functional": "cover nominal behaviour plus boundary and negative cases.",
+}

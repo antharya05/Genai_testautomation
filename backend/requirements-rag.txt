@@ -1,0 +1,6 @@
+# Optional RAG stack — only needed when RAG_ENABLED=true.
+# Heavy (pulls in torch, ~2GB) so it is kept out of the base requirements.txt
+# to keep resource-constrained deploys (e.g. Render free tier) buildable.
+#   pip install -r requirements.txt -r requirements-rag.txt
+chromadb
+sentence-transformers

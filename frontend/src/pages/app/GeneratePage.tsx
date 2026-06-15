@@ -397,6 +397,8 @@ export default function GeneratePage() {
   // ─── Event handlers ─────────────────────────────────────────────────────────
 
   function handleUploadSuccess(data: UploadResult) {
+    // TEMP debug: confirm rich parser metadata survived the upload response.
+    console.debug("[bridge] upload parsed count:", data.parsed?.length ?? 0, "/ requirements:", data.requirement_count);
     setUploadData(data);
     setPhase("review");
     pushToast(
@@ -421,7 +423,11 @@ export default function GeneratePage() {
     });
 
     try {
-      const { job_id } = await startGeneration(requirements, projectId);
+      // Forward the parser's structured metadata so generation uses authoritative
+      // requirement ids / ASIL / thresholds instead of re-deriving from strings.
+      // The backend correlates each record by its flattened "id: statement" text,
+      // so sending the full set is safe even when only a subset is selected.
+      const { job_id } = await startGeneration(requirements, projectId, uploadData?.parsed);
       setLastJobId(job_id);
       const es = openJobStream(job_id);
       esRef.current = es;

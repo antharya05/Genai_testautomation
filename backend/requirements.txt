@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 python-multipart
 pymupdf
+pdfplumber
 python-docx
 python-dotenv
 anthropic
@@ -9,10 +10,10 @@ groq
 google-generativeai
 pydantic
 openpyxl
-# RAG dependencies
-chromadb
-sentence-transformers
 # Database
 sqlalchemy
 alembic
 psycopg2-binary
+# RAG dependencies (chromadb + sentence-transformers/torch) live in
+# requirements-rag.txt — they are heavy and only needed when RAG_ENABLED=true.
+# Install both for full local dev:  pip install -r requirements.txt -r requirements-rag.txt

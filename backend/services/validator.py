@@ -89,6 +89,11 @@ def validate_coverage(cases: list, meta: dict) -> dict:
         "boundary_coverage": None,
         "test_types": [],
         "hallucinated_values": [],
+        # ASIL provenance surfaced for downstream consumers (UI / export).
+        "asil": meta.get("asil", "QM"),
+        "asil_source": meta.get("asil_source", "estimated"),
+        "asil_confidence": int(meta.get("asil_confidence", 100)),
+        "asil_coverage": None,
         "warnings": [],
     }
 
@@ -124,6 +129,32 @@ def validate_coverage(cases: list, meta: dict) -> dict:
     report["test_types"] = sorted({c.test_type for c in cases})
     if len(report["test_types"]) < 2:
         report["warnings"].append("Low test-type diversity (only one test type generated)")
+
+    # 3b. ASIL coverage depth — does the generated set meet the minimum test
+    # types / count expected for this ASIL? Non-destructive: warning only.
+    from services.asil import ASIL_MIN_CASES, ASIL_MIN_TEST_TYPES
+
+    asil = report["asil"]
+    present_types = set(report["test_types"])
+    required_types = ASIL_MIN_TEST_TYPES.get(asil, set())
+    missing_types = sorted(required_types - present_types)
+    min_cases = ASIL_MIN_CASES.get(asil, 2)
+    report["asil_coverage"] = {
+        "asil": asil,
+        "source": report["asil_source"],
+        "required_test_types": sorted(required_types),
+        "missing_test_types": missing_types,
+        "min_cases": min_cases,
+        "actual_cases": len(cases),
+    }
+    if missing_types:
+        report["warnings"].append(
+            f"ASIL {asil} coverage gap — missing test type(s): {', '.join(missing_types)}"
+        )
+    if len(cases) < min_cases:
+        report["warnings"].append(
+            f"ASIL {asil} expects at least {min_cases} test cases; got {len(cases)}"
+        )
 
     # 4. Hallucinated numeric / CAN-id values
     allowed = meta.get("numeric_tokens") or set()

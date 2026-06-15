@@ -13,6 +13,11 @@ class TestCase(BaseModel):
     requirement_id: str = "REQ_UNKNOWN"
     title: str
     asil: str = "QM"
+    # Provenance of the ASIL value: "requirement" (stated in the document) or
+    # "estimated" (inferred from content). asil_confidence is 0-100 and only
+    # meaningful for estimated values (always 100 when stated).
+    asil_source: str = "estimated"
+    asil_confidence: int = 100
     test_type: str = "functional"
     preconditions: list[str] = []
     steps: list[str]
@@ -36,6 +41,12 @@ class TestCase(BaseModel):
     @classmethod
     def validate_asil(cls, v: str) -> str:
         return v if v in VALID_ASIL else "QM"
+
+    @field_validator("asil_source")
+    @classmethod
+    def validate_asil_source(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        return v if v in {"requirement", "estimated"} else "estimated"
 
     @field_validator("test_type")
     @classmethod
@@ -82,6 +93,11 @@ class GenerateRequest(BaseModel):
     project_id: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    # Optional structured parser metadata (ParsedRequirement.to_dict() records).
+    # When present, generation uses authoritative parser fields (requirement_id,
+    # asil, category, …) instead of re-deriving them from the flattened string.
+    # Absent for raw-text / legacy callers, which keep the list[str] behaviour.
+    parsed: Optional[list[dict]] = None
 
 
 class ProviderKeyRequest(BaseModel):

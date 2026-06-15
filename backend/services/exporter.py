@@ -34,11 +34,11 @@ def export_excel(test_cases: list[dict], project_name: str = "automotive_project
     )
 
     headers = [
-        "Test ID", "Requirement ID", "Title", "ASIL", "Test Type",
-        "Preconditions", "Steps", "Expected Results",
+        "Test ID", "Requirement ID", "Title", "ASIL", "ASIL Source", "ASIL Confidence",
+        "Test Type", "Preconditions", "Steps", "Expected Results",
         "Model", "Prompt Ver", "Timestamp", "Retries",
     ]
-    widths = [12, 18, 42, 8, 16, 40, 52, 52, 22, 12, 26, 8]
+    widths = [12, 18, 42, 8, 13, 14, 16, 40, 52, 52, 22, 12, 26, 8]
 
     for col, (h, w) in enumerate(zip(headers, widths), 1):
         c = ws.cell(row=1, column=col, value=h)
@@ -66,6 +66,8 @@ def export_excel(test_cases: list[dict], project_name: str = "automotive_project
             tc.get("requirement_id", ""),
             tc.get("title", ""),
             asil,
+            tc.get("asil_source", "estimated"),
+            str(tc.get("asil_confidence", 100)),
             tc.get("test_type", ""),
             "\n".join(f"• {p}" for p in tc.get("preconditions", [])),
             steps_text,
@@ -77,7 +79,7 @@ def export_excel(test_cases: list[dict], project_name: str = "automotive_project
         ]
         for col, val in enumerate(values, 1):
             c = ws.cell(row=ridx, column=col, value=val)
-            c.alignment = top_left if col > 4 else center
+            c.alignment = top_left if col > 6 else center
             c.border = thin
             c.fill = row_fill
 
@@ -117,7 +119,8 @@ def export_jira_csv(test_cases: list[dict]) -> str:
     fieldnames = [
         "Issue Type", "Summary", "Description", "Priority",
         "Labels", "Custom field (Test Type)",
-        "Custom field (ASIL Level)", "Custom field (Requirement ID)",
+        "Custom field (ASIL Level)", "Custom field (ASIL Source)",
+        "Custom field (ASIL Confidence)", "Custom field (Requirement ID)",
     ]
     writer = csv.DictWriter(out, fieldnames=fieldnames)
     writer.writeheader()
@@ -142,6 +145,8 @@ def export_jira_csv(test_cases: list[dict]) -> str:
             "Labels": f"automotive,iso26262,{asil.lower()}",
             "Custom field (Test Type)": tc.get("test_type", ""),
             "Custom field (ASIL Level)": asil,
+            "Custom field (ASIL Source)": tc.get("asil_source", "estimated"),
+            "Custom field (ASIL Confidence)": tc.get("asil_confidence", 100),
             "Custom field (Requirement ID)": tc.get("requirement_id", ""),
         })
 
