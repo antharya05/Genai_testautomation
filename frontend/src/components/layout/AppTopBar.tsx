@@ -1,11 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, ChevronDown, LogOut, Menu, Moon, Sun, User } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Menu, User } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getActiveProvider } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useProject } from '../../context/ProjectContext';
-import { useTheme } from '../../hooks/useTheme';
 import { formatModelName } from '../../utils/format';
 import type { ActiveProvider } from '../../types';
 
@@ -33,7 +32,6 @@ interface Props {
 }
 
 export function AppTopBar({ sidebarWidth, isMobile, onMobileMenuOpen }: Props) {
-  const { isDark, toggle } = useTheme();
   const { user, signOut } = useAuth();
   const { projects, selectedProject, setSelectedProject } = useProject();
   const navigate = useNavigate();
@@ -217,22 +215,6 @@ export function AppTopBar({ sidebarWidth, isMobile, onMobileMenuOpen }: Props) {
           background: 'var(--c-accent)', border: '1.5px solid var(--c-bg)',
         }} />
       </button>
-
-      {/* Theme toggle */}
-      <motion.button
-        className="btn-icon" onClick={toggle}
-        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        whileTap={{ scale: 0.9 }}
-      >
-        <motion.div
-          key={isDark ? 'sun' : 'moon'}
-          initial={{ rotate: -30, opacity: 0 }}
-          animate={{ rotate: 0, opacity: 1 }}
-          transition={{ duration: 0.2 }}
-        >
-          {isDark ? <Sun size={16} /> : <Moon size={16} />}
-        </motion.div>
-      </motion.button>
 
       {/* User avatar + dropdown */}
       <div ref={menuRef} style={{ position: 'relative' }}>

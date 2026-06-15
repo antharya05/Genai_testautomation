@@ -2,9 +2,6 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
-/* Enable Tailwind dark: prefix with .dark class on <html> */
-@variant dark (&:where(.dark, .dark *));
-
 :root {
   --c-bg:#FAFAFA;--c-bg-2:#F4F4F5;--c-surface:#FFFFFF;--c-surface-2:#F8F8F8;
   --c-border:rgba(0,0,0,0.07);--c-border-2:rgba(0,0,0,0.12);
@@ -26,18 +23,6 @@
   --t-fast:120ms cubic-bezier(0.4,0,0.2,1);--t-normal:200ms cubic-bezier(0.4,0,0.2,1);--t-slow:350ms cubic-bezier(0.16,1,0.3,1);
   --font:'Inter',system-ui,-apple-system,sans-serif;--font-mono:'JetBrains Mono','Fira Code',monospace;
 }
-[data-theme="dark"] {
-  --c-bg:#09090B;--c-bg-2:#0F0F11;--c-surface:#18181B;--c-surface-2:#1F1F23;
-  --c-border:rgba(255,255,255,0.07);--c-border-2:rgba(255,255,255,0.12);
-  --c-text:#FAFAFA;--c-text-2:#A1A1AA;--c-text-3:#52525B;
-  --c-accent:#818CF8;--c-accent-2:#6366F1;--c-accent-dim:rgba(129,140,248,0.10);--c-accent-glow:rgba(129,140,248,0.22);
-  --c-sidebar:#0B1120;--c-sidebar-border:rgba(255,255,255,0.08);
-  --asil-qm-bg:#27272A;--asil-qm-text:#A1A1AA;--asil-qm-ring:#3F3F46;
-  --asil-a-bg:#052e16;--asil-a-text:#86EFAC;--asil-a-ring:#166534;
-  --asil-b-bg:#422006;--asil-b-text:#FDE047;--asil-b-ring:#854D0E;
-  --asil-c-bg:#431407;--asil-c-text:#FDBA74;--asil-c-ring:#9A3412;
-  --asil-d-bg:#450A0A;--asil-d-text:#FCA5A5;--asil-d-ring:#991B1B;
-}
 *,*::before,*::after{box-sizing:border-box;}
 html{font-family:var(--font);-webkit-font-smoothing:antialiased;scroll-behavior:smooth;}
 body{margin:0;background:var(--c-bg);color:var(--c-text);min-height:100vh;transition:background var(--t-slow),color var(--t-slow);}
@@ -48,7 +33,6 @@ body{margin:0;background:var(--c-bg);color:var(--c-text);min-height:100vh;transi
 ::-webkit-scrollbar-thumb:hover{background:var(--c-text-3);}
 .glass{background:var(--c-surface);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--c-border);}
 .gradient-hero{background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(99,102,241,0.12) 0%,transparent 70%),var(--c-bg);}
-[data-theme="dark"] .gradient-hero{background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(129,140,248,0.16) 0%,transparent 70%),var(--c-bg);}
 .grid-bg{background-image:linear-gradient(var(--c-border) 1px,transparent 1px),linear-gradient(90deg,var(--c-border) 1px,transparent 1px);background-size:40px 40px;}
 .glow{box-shadow:var(--sh-glow);}.glow-sm{box-shadow:var(--sh-glow-sm);}
 .glow-pulse{animation:glowPulse 2.2s ease-in-out infinite;}

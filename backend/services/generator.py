@@ -57,29 +57,49 @@ def _parse(content: str) -> list[dict]:
     raise ValueError(f"Unexpected JSON type: {type(parsed).__name__}")
 
 
+def _preserve_requirement_id(cases: list, req_id: str) -> None:
+    """Force the deterministically-extracted requirement id onto every case.
+
+    The id comes from regex extraction (cannot hallucinate), so it is
+    authoritative over whatever the LLM produced. Only applied when a real id
+    was found — otherwise the LLM's best guess is left in place.
+    """
+    if not req_id or req_id == "REQ_UNKNOWN":
+        return
+    for tc in cases:
+        tc.requirement_id = req_id
+
+
 async def _generate_one(
     requirement: str,
     tc_offset: int,
     prompt_version: str,
     provider=None,
-) -> tuple[list, int, list[dict]]:
+) -> tuple[list, int, list[dict], dict]:
     """
     Generate test cases for a single requirement.
-    Returns (test_cases, retry_count, rag_chunks).
+    Returns (test_cases, retry_count, rag_chunks, coverage_report).
     """
     from prompts.manager import get_prompt
     from providers import get_provider
     from services import cache
+    from services import requirement_analyzer as analyzer
     from services import validator
     from services.rag import rag_pipeline
+
+    # ── Deterministic metadata extraction (no LLM, cannot hallucinate) ──
+    meta = analyzer.extract_metadata(requirement)
+    req_id = meta["requirement_id"]
 
     # ── Cache check ──────────────────────────────────────────────
     cached = cache.get(requirement, prompt_version)
     if cached:
-        cases, warnings = validator.validate_batch(cached, offset=tc_offset)
+        cases, warnings = validator.validate_batch(cached, req_id=req_id, offset=tc_offset)
         for i, tc in enumerate(cases):
             tc.test_id = f"TC_{tc_offset + i + 1:03d}"
-        return cases, 0, []
+        _preserve_requirement_id(cases, req_id)
+        coverage = validator.validate_coverage(cases, meta)
+        return cases, 0, [], coverage
 
     if provider is None:
         provider = get_provider()
@@ -87,6 +107,10 @@ async def _generate_one(
 
     # ── RAG enrichment ────────────────────────────────────────────
     user_msg, rag_chunks = rag_pipeline.build_enriched_prompt(requirement)
+
+    # ── Prepend authoritative extracted facts (anti-hallucination) ──
+    facts_block = analyzer.format_metadata_block(meta)
+    user_msg = f"{facts_block}\n\n{'=' * 60}\n\n{user_msg}"
 
     # ── LLM call with retry ───────────────────────────────────────
     last_exc: Optional[Exception] = None
@@ -100,7 +124,7 @@ async def _generate_one(
                 ),
             )
             raw_list = _parse(content)
-            cases, warnings = validator.validate_batch(raw_list, offset=tc_offset)
+            cases, warnings = validator.validate_batch(raw_list, req_id=req_id, offset=tc_offset)
 
             if warnings:
                 logger.warning("Validation warnings for '%s...': %s", requirement[:40], warnings)
@@ -123,9 +147,17 @@ async def _generate_one(
                 tc.rag_sources = rag_sources
                 tc.rag_top_score = rag_score
 
+            # ── Requirement ID preservation (authoritative regex id) ──
+            _preserve_requirement_id(cases, req_id)
+
+            # ── Post-generation coverage validation ───────────────
+            coverage = validator.validate_coverage(cases, meta)
+            if coverage["warnings"]:
+                logger.info("Coverage findings for %s: %s", req_id, coverage["warnings"])
+
             # ── Cache the result ──────────────────────────────────
             cache.set(requirement, prompt_version, [tc.model_dump() for tc in cases])
-            return cases, attempt, rag_chunks
+            return cases, attempt, rag_chunks, coverage
 
         except Exception as exc:
             last_exc = exc
@@ -134,7 +166,7 @@ async def _generate_one(
                 await asyncio.sleep(0.3 * (attempt + 1))
 
     logger.error("All attempts failed for '%s...': %s", requirement[:40], last_exc)
-    return [], MAX_RETRIES, []
+    return [], MAX_RETRIES, [], validator.validate_coverage([], meta)
 
 
 async def run_batch(requirements: list[str], job_id: str, jobs: dict, provider=None) -> None:
@@ -150,10 +182,14 @@ async def run_batch(requirements: list[str], job_id: str, jobs: dict, provider=N
     seen_titles: list[str] = []
     tc_offset = 0
 
+    jobs[job_id].setdefault("coverage", [])
+
     async def process(req: str, idx: int) -> None:
         nonlocal tc_offset
         async with semaphore:
-            cases, retries, rag_chunks = await _generate_one(req, tc_offset, prompt_version, provider)
+            cases, retries, rag_chunks, coverage = await _generate_one(
+                req, tc_offset, prompt_version, provider
+            )
             tc_offset += len(cases)
 
             unique = []
@@ -165,9 +201,11 @@ async def run_batch(requirements: list[str], job_id: str, jobs: dict, provider=N
             jobs[job_id]["current"] = idx + 1
             jobs[job_id]["test_cases"].extend([tc.model_dump() for tc in unique])
             jobs[job_id]["rag_enabled"] = True
+            jobs[job_id]["coverage"].append({"requirement_index": idx, **coverage})
             logger.info(
-                "Req %d/%d done — %d cases, %d RAG chunks, %d retries",
+                "Req %d/%d done — %d cases, %d RAG chunks, %d retries, %d coverage warnings",
                 idx + 1, len(requirements), len(unique), len(rag_chunks), retries,
+                len(coverage.get("warnings", [])),
             )
 
     tasks = [process(req, i) for i, req in enumerate(requirements)]

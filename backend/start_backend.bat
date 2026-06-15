@@ -29,4 +29,18 @@ echo Starting uvicorn with --reload (auto-restarts on code changes)...
 echo Press Ctrl+C to stop.
 echo.
 
-venv\Scripts\uvicorn.exe main:app --host 127.0.0.1 --port 8000 --reload
+rem --reload watches the whole backend\ tree, which also contains the venv and
+rem runtime data dirs. Exclude them so source-only changes trigger a reload and
+rem RAG/ChromaDB is not needlessly re-initialised (~2s each) on every restart.
+rem NOTES on uvicorn's quirks (both verified):
+rem  * RELATIVE exclude dir names are ignored — the path must be absolute.
+rem  * Only DIRECTORY excludes are safe; an absolute file/glob pattern makes
+rem    uvicorn call cwd.glob(<absolute>), which raises NotImplementedError.
+rem %~dp0 expands to this script's dir (backend\) with a trailing backslash;
+rem strip the trailing slash so the path is a clean directory.
+set "ROOT=%~dp0"
+set "ROOT=%ROOT:~0,-1%"
+venv\Scripts\uvicorn.exe main:app --host 127.0.0.1 --port 8000 --reload ^
+  --reload-exclude "%ROOT%\venv" ^
+  --reload-exclude "%ROOT%\vectorstore_data" ^
+  --reload-exclude "%ROOT%\uploads"

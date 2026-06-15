@@ -1,11 +1,10 @@
 import { motion } from 'framer-motion';
-import { CheckCircle2, Eye, EyeOff, LogOut, Palette, Settings, Trash2, User, Wifi, WifiOff } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, LogOut, Settings, Trash2, User, Wifi, WifiOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { deleteProviderKey, listProviderKeys, saveProviderKey } from '../../api/client';
 import { PageTransition } from '../../components/layout/PageTransition';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../hooks/useTheme';
 
 // ─── Provider / model catalogue ───────────────────────────────────────────────
 
@@ -68,7 +67,6 @@ const USE_ENDPOINT_PROVIDERS = new Set(['ollama']);
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { isDark, toggle } = useTheme();
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -159,48 +157,6 @@ export default function SettingsPage() {
         <p style={{ color: 'var(--c-text-2)', fontSize: '0.875rem', margin: '0 0 32px' }}>
           Workspace preferences and account
         </p>
-
-        {/* Appearance */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{
-            background: 'var(--c-surface)', border: '1px solid var(--c-border)',
-            borderRadius: 14, padding: '20px 24px', marginBottom: 12,
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: 9,
-              background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Palette size={17} color="#a855f7" strokeWidth={1.75} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)', marginBottom: 2 }}>
-                Appearance
-              </div>
-              <div style={{ fontSize: '0.8125rem', color: 'var(--c-text-3)' }}>
-                Currently: {isDark ? 'Dark mode' : 'Light mode'}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={toggle}
-            style={{
-              padding: '7px 18px', borderRadius: 8, border: '1px solid var(--c-border)',
-              background: 'var(--c-bg-2)', color: 'var(--c-text-2)', cursor: 'pointer',
-              fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'var(--font)',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--c-accent)'; el.style.color = 'var(--c-accent)'; el.style.background = 'var(--c-accent-dim)'; }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--c-border)'; el.style.color = 'var(--c-text-2)'; el.style.background = 'var(--c-bg-2)'; }}
-          >
-            Toggle Theme
-          </button>
-        </motion.div>
 
         {/* AI Configuration */}
         <motion.div

@@ -17,6 +17,10 @@ class TestCase(BaseModel):
     preconditions: list[str] = []
     steps: list[str]
     expected_results: list[str]
+    # Boundary testing: "" | "below" | "at" | "above"
+    boundary_position: str = ""
+    # Post-generation coverage validation findings (e.g. invented values)
+    coverage_warnings: list[str] = []
     # Audit metadata
     source_requirement_text: str = ""
     generation_timestamp: str = ""
@@ -37,6 +41,12 @@ class TestCase(BaseModel):
     @classmethod
     def validate_test_type(cls, v: str) -> str:
         return v if v in VALID_TEST_TYPES else "functional"
+
+    @field_validator("boundary_position")
+    @classmethod
+    def validate_boundary_position(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        return v if v in {"below", "at", "above"} else ""
 
     @field_validator("title")
     @classmethod

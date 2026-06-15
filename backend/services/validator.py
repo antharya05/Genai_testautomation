@@ -20,6 +20,9 @@ def repair(raw: dict, fallback_req_id: str = "REQ_UNKNOWN", tc_index: int = 1) -
     if raw.get("test_type") not in VALID_TEST_TYPES:
         raw["test_type"] = "functional"
 
+    bp = str(raw.get("boundary_position", "")).strip().lower()
+    raw["boundary_position"] = bp if bp in {"below", "at", "above"} else ""
+
     for field in ("preconditions", "steps", "expected_results"):
         val = raw.get(field)
         if isinstance(val, str):
@@ -60,3 +63,82 @@ def validate_batch(
             logger.warning(msg)
 
     return valid, warnings
+
+
+def validate_coverage(cases: list, meta: dict) -> dict:
+    """
+    Post-generation coverage validation for one requirement's test cases.
+
+    Checks (non-destructive — produces warnings, never drops cases):
+      1. Requirement ID preservation — every case carries the extracted id.
+      2. Boundary coverage — when the requirement has numeric thresholds, the
+         below/at/above positions should all be present.
+      3. Test-type diversity — more than one test type generated.
+      4. Hallucinated values — numeric/CAN-id tokens in the generated text that
+         do not appear in the requirement. Flagged cases get
+         validation_status="warning" and per-case coverage_warnings.
+
+    Returns a report dict suitable for logging / surfacing to the UI.
+    Mutates each affected TestCase in place.
+    """
+    from services import requirement_analyzer as analyzer
+
+    report = {
+        "requirement_id": meta.get("requirement_id", "REQ_UNKNOWN"),
+        "requirement_id_preserved": True,
+        "boundary_coverage": None,
+        "test_types": [],
+        "hallucinated_values": [],
+        "warnings": [],
+    }
+
+    if not cases:
+        report["warnings"].append("No valid test cases generated for requirement")
+        return report
+
+    # 1. Requirement ID preservation
+    rid = meta.get("requirement_id", "REQ_UNKNOWN")
+    if rid and rid != "REQ_UNKNOWN":
+        mismatched = [c for c in cases if c.requirement_id != rid]
+        if mismatched:
+            report["requirement_id_preserved"] = False
+            report["warnings"].append(
+                f"{len(mismatched)} test case(s) not tagged with requirement id {rid}"
+            )
+
+    # 2. Boundary coverage — only meaningful when numeric thresholds exist
+    thresholded = [t for t in meta.get("thresholds", []) if t.get("unit")]
+    if thresholded:
+        positions = {c.boundary_position for c in cases if c.boundary_position}
+        missing = [p for p in ("below", "at", "above") if p not in positions]
+        report["boundary_coverage"] = {
+            "present": sorted(positions),
+            "missing": missing,
+        }
+        if missing:
+            report["warnings"].append(
+                f"Incomplete boundary coverage — missing: {', '.join(missing)}"
+            )
+
+    # 3. Test-type diversity
+    report["test_types"] = sorted({c.test_type for c in cases})
+    if len(report["test_types"]) < 2:
+        report["warnings"].append("Low test-type diversity (only one test type generated)")
+
+    # 4. Hallucinated numeric / CAN-id values
+    allowed = meta.get("numeric_tokens") or set()
+    for c in cases:
+        text = " ".join(c.steps + c.expected_results + c.preconditions)
+        extras = sorted(analyzer.numeric_tokens(text) - allowed)
+        if extras:
+            c.validation_status = "warning"
+            c.coverage_warnings = [f"Value not stated in requirement: {e}" for e in extras]
+            report["hallucinated_values"].extend(extras)
+
+    report["hallucinated_values"] = sorted(set(report["hallucinated_values"]))
+    if report["hallucinated_values"]:
+        report["warnings"].append(
+            f"Possible invented values: {', '.join(report['hallucinated_values'])}"
+        )
+
+    return report

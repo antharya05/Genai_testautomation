@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProjectProvider } from './context/ProjectContext';
@@ -16,25 +16,6 @@ import TestCasesPage from './pages/app/TestCasesPage';
 import TraceabilityPage from './pages/app/TraceabilityPage';
 import ReviewPage from './pages/app/ReviewPage';
 
-function ThemeInit() {
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('theme');
-      const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-      const isDark = stored ? stored === 'dark' : prefersDark ?? true;
-      const html = document.documentElement;
-      if (isDark) {
-        html.classList.add('dark');
-        html.setAttribute('data-theme', 'dark');
-      } else {
-        html.classList.remove('dark');
-        html.setAttribute('data-theme', 'light');
-      }
-    } catch { /* ignore */ }
-  }, []);
-  return null;
-}
-
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const location = useLocation();
@@ -49,7 +30,6 @@ export default function App() {
     <AuthProvider>
       <ProjectProvider>
       <BrowserRouter>
-        <ThemeInit />
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/signin" element={<SignInPage />} />
