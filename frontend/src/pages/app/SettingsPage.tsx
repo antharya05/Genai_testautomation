@@ -1,10 +1,11 @@
 import { motion } from 'framer-motion';
-import { CheckCircle2, Eye, EyeOff, LogOut, Settings, Trash2, User, Wifi, WifiOff } from 'lucide-react';
+import { Activity, CheckCircle2, Eye, EyeOff, LogOut, RefreshCw, Settings, Trash2, User, Wifi, WifiOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { deleteProviderKey, listProviderKeys, saveProviderKey } from '../../api/client';
+import { deleteProviderKey, getProviderHealth, listProviderKeys, saveProviderKey } from '../../api/client';
 import { PageTransition } from '../../components/layout/PageTransition';
 import { useAuth } from '../../context/AuthContext';
+import type { ProviderHealth } from '../../types';
 
 // ─── Provider / model catalogue ───────────────────────────────────────────────
 
@@ -64,6 +65,18 @@ const PROVIDER_IDS: Record<string, string> = {
 
 const USE_ENDPOINT_PROVIDERS = new Set(['ollama']);
 
+// Status → colour. Healthy = green, transient (rate/quota) = amber, hard fail = red.
+function healthColor(status: string): string {
+  if (status === 'healthy') return '#10b981';
+  if (status === 'not_configured') return 'var(--c-text-3)';
+  if (status === 'rate_limit' || status === 'quota_exhausted' || status === 'timeout') return '#f59e0b';
+  return '#ef4444';
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', groq: 'Groq', ollama: 'Ollama',
+};
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -80,9 +93,20 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
 
+  const [health, setHealth] = useState<ProviderHealth[]>([]);
+  const [checkingHealth, setCheckingHealth] = useState(false);
+
   useEffect(() => {
     loadKeyForProvider(selectedProvider);
   }, [selectedProvider]);
+
+  async function loadHealth() {
+    setCheckingHealth(true);
+    try {
+      setHealth(await getProviderHealth());
+    } catch { /* ignore — backend may be offline */ }
+    finally { setCheckingHealth(false); }
+  }
 
   function handleProviderChange(provider: string) {
     setSelectedProvider(provider);
@@ -339,6 +363,93 @@ export default function SettingsPage() {
                 </span>
               )}
             </div>
+          </div>
+        </motion.div>
+
+        {/* Provider Health */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.06 }}
+          style={{
+            background: 'var(--c-surface)', border: '1px solid var(--c-border)',
+            borderRadius: 14, overflow: 'hidden', marginBottom: 12,
+          }}
+        >
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 9,
+              background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Activity size={17} color="var(--c-accent)" strokeWidth={1.75} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)' }}>Provider Health</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--c-text-3)', marginTop: 1 }}>
+                Live status, quota and latency for each configured provider
+              </div>
+            </div>
+            <button
+              onClick={loadHealth}
+              disabled={checkingHealth}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 12px', borderRadius: 8, cursor: checkingHealth ? 'wait' : 'pointer',
+                background: 'var(--c-bg-2)', border: '1px solid var(--c-border)',
+                color: 'var(--c-text-2)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'var(--font)',
+              }}
+            >
+              <RefreshCw size={13} style={{ opacity: checkingHealth ? 0.5 : 1 }} />
+              {checkingHealth ? 'Checking…' : 'Check health'}
+            </button>
+          </div>
+
+          <div style={{ padding: health.length ? '8px 20px 14px' : '18px 20px' }}>
+            {health.length === 0 ? (
+              <div style={{ fontSize: '0.8125rem', color: 'var(--c-text-3)' }}>
+                Run a health check to probe each provider's live status.
+              </div>
+            ) : (
+              health.map(h => (
+                <div
+                  key={h.provider}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 0', borderBottom: '1px solid var(--c-border)',
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: healthColor(h.status) }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '0.8625rem', fontWeight: 600, color: 'var(--c-text)' }}>
+                        {PROVIDER_LABELS[h.provider] ?? h.provider}
+                      </span>
+                      {h.active && (
+                        <span style={{
+                          fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.04em',
+                          padding: '1px 6px', borderRadius: 4, color: 'var(--c-accent)',
+                          background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
+                        }}>ACTIVE</span>
+                      )}
+                    </div>
+                    {h.last_error && (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--c-text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {h.last_error}
+                      </div>
+                    )}
+                  </div>
+                  {h.latency_ms != null && (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--c-text-3)', flexShrink: 0 }}>
+                      {Math.round(h.latency_ms)}ms
+                    </span>
+                  )}
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: healthColor(h.status), flexShrink: 0, minWidth: 92, textAlign: 'right' }}>
+                    {h.label}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </motion.div>
 

@@ -146,3 +146,29 @@ export interface ActiveProvider {
   model: string;
   has_key: boolean;
 }
+
+export interface ProviderHealth {
+  provider: string;
+  model: string;
+  configured: boolean;
+  active: boolean;
+  status: string;        // healthy | not_configured | invalid_key | rate_limit | quota_exhausted | provider_unavailable | ...
+  label: string;         // Healthy | Invalid Key | Rate Limited | Quota Exhausted | Offline | Not Configured
+  last_error?: string | null;
+  latency_ms?: number | null;
+  quota_state: string;   // ok | rate_limited | exhausted | unknown
+  checked_at: string;
+}
+
+export interface ProviderMetric {
+  provider: string;
+  requests: number;
+  failures: number;
+  tokens_in: number;
+  tokens_out: number;
+  avg_latency_ms: number;
+  last_latency_ms?: number | null;
+  error_rate: number;
+  last_error?: string | null;
+  last_used?: string | null;
+}

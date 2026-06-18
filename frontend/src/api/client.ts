@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { ActiveProvider, JobStatus, ParsedRequirement, Project, ProjectStats, ProviderConfig, Run, TestCase, UploadResult } from "../types";
+import type { ActiveProvider, JobStatus, ParsedRequirement, Project, ProjectStats, ProviderConfig, ProviderHealth, ProviderMetric, Run, TestCase, UploadResult } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -33,7 +33,7 @@ export async function startGeneration(
   requirements: string[],
   projectId?: string,
   parsed?: ParsedRequirement[],
-): Promise<{ job_id: string; total: number }> {
+): Promise<{ job_id?: string; total?: number; error?: string; error_type?: string }> {
   const body: {
     requirements: string[];
     project_id: string | null;
@@ -47,9 +47,12 @@ export async function startGeneration(
   if (parsed && parsed.length > 0) {
     body.parsed = parsed;
   }
-  // TEMP debug: how many structured records are we sending to /generate?
-  console.debug("[bridge] startGeneration → parsed count:", parsed?.length ?? 0);
-  const res = await api.post<{ job_id: string; total: number }>("/generate", body);
+  // Strict BYOK: the backend returns { error, error_type } (and no job_id) when
+  // no provider key is configured, so callers must check for `error`.
+  const res = await api.post<{ job_id?: string; total?: number; error?: string; error_type?: string }>(
+    "/generate",
+    body,
+  );
   return res.data;
 }
 
@@ -162,6 +165,16 @@ export async function getActiveProvider(): Promise<ActiveProvider> {
 
 export async function deleteProviderKey(provider: string): Promise<void> {
   await api.delete(`/providers/keys/${provider}`);
+}
+
+export async function getProviderHealth(): Promise<ProviderHealth[]> {
+  const res = await api.get<{ providers: ProviderHealth[] }>("/providers/health");
+  return res.data.providers;
+}
+
+export async function getProviderMetrics(): Promise<ProviderMetric[]> {
+  const res = await api.get<{ metrics: ProviderMetric[] }>("/providers/metrics");
+  return res.data.metrics;
 }
 
 // ─── Review ───────────────────────────────────────────────────────────────────

@@ -58,8 +58,13 @@ export default function GenerateApp() {
     setGenProgress({ current: 0, total: requirements.length, casesFound: 0, currentReq: "", ragActive: true, genPhase: "queued" });
 
     try {
-      const { job_id } = await startGeneration(requirements);
-      const es = openJobStream(job_id);
+      const start = await startGeneration(requirements);
+      if (!start.job_id) {
+        pushToast("error", start.error ?? "No AI provider configured. Add a key in Settings.");
+        setPhase("review");
+        return;
+      }
+      const es = openJobStream(start.job_id);
       esRef.current = es;
 
       es.onmessage = (e) => {

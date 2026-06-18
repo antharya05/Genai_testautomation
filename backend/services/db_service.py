@@ -38,6 +38,21 @@ def ensure_review_columns(db: Session) -> None:
             db.rollback()
 
 
+def ensure_observability_columns(db: Session) -> None:
+    """Add provider-observability columns to runs if absent (zero-downtime migration)."""
+    for col_def in [
+        "failed_requirement_count INTEGER DEFAULT 0",
+        "error_count INTEGER DEFAULT 0",
+        "generation_duration FLOAT",
+        "fallback_used BOOLEAN DEFAULT 0",
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE runs ADD COLUMN {col_def}"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
 # ─────────────────────────────────────────────
 # Projects
 # ─────────────────────────────────────────────
@@ -141,12 +156,26 @@ def create_run(
     return run
 
 
-def complete_run(
+def finalize_run(
     db: Session,
     job_id: str,
     test_cases: list[dict],
     rag_enabled: bool,
+    *,
+    outcome: str = "complete",
+    reason: Optional[str] = None,
+    error_count: int = 0,
+    failed_requirement_count: int = 0,
+    generation_duration: Optional[float] = None,
+    fallback_used: bool = False,
 ) -> None:
+    """Persist the terminal state of a run.
+
+    ``outcome`` is one of ``complete`` / ``warning`` / ``failed`` (see
+    ``generator.run_batch``). Whatever test cases were produced are persisted in
+    every case — a ``warning`` run keeps its partial results, a ``failed`` run
+    records the reason and the observability counts even with zero cases.
+    """
     run = db.query(Run).filter(Run.id == job_id).first()
     if not run:
         return
@@ -157,10 +186,15 @@ def complete_run(
         t = tc.get("test_type", "functional")
         counts[t] = counts.get(t, 0) + 1
 
-    run.status = "complete"
+    run.status = outcome
+    run.error = reason
     run.completed_at = datetime.utcnow()
     run.test_case_count = len(test_cases)
     run.rag_enabled = rag_enabled
+    run.failed_requirement_count = failed_requirement_count
+    run.error_count = error_count
+    run.generation_duration = generation_duration
+    run.fallback_used = fallback_used
     run.functional_count = counts.get("functional", 0)
     run.boundary_count = counts.get("boundary", 0)
     run.negative_count = counts.get("negative", 0)
@@ -308,6 +342,11 @@ def run_to_dict(run: Run) -> dict:
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
         "error": run.error,
+        "reason": run.error,
+        "failed_requirement_count": getattr(run, "failed_requirement_count", 0) or 0,
+        "error_count": getattr(run, "error_count", 0) or 0,
+        "generation_duration": getattr(run, "generation_duration", None),
+        "fallback_used": bool(getattr(run, "fallback_used", False)),
         "functional_count": run.functional_count or 0,
         "boundary_count": run.boundary_count or 0,
         "negative_count": run.negative_count or 0,

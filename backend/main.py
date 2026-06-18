@@ -34,18 +34,19 @@ from database import Base, SessionLocal, engine
 import db_models  # noqa: F401 — registers all ORM tables with Base
 from models import ExportRequest, GenerateRequest, ProviderKeyRequest, TextRequest
 from parsing import parse_document, parse_text
-from providers import get_provider_from_db
+from providers import ProviderError, provider_manager
 from prompts.manager import get_current_version
 from services import exporter
 from services.db_service import (
     DEFAULT_PROJECT_ID,
-    complete_run,
     create_project,
     create_run,
     delete_project,
     ensure_default_project,
+    ensure_observability_columns,
     ensure_review_columns,
     fail_run,
+    finalize_run,
     get_project,
     get_project_stats,
     get_requirements_for_run,
@@ -80,6 +81,7 @@ async def lifespan(app: FastAPI):
     try:
         ensure_default_project(db)
         ensure_review_columns(db)
+        ensure_observability_columns(db)
         swept = sweep_interrupted_runs(db)
         if swept:
             logger.warning("Swept %d interrupted run(s) → status=error.", swept)
@@ -134,7 +136,7 @@ def _resolve_llm_provider():
     """
     db = SessionLocal()
     try:
-        return get_provider_from_db(db)
+        return provider_manager.try_get_active_provider(db)
     except Exception as exc:
         logger.warning("No LLM provider available for parser fallback: %s", exc)
         return None
@@ -265,12 +267,23 @@ async def _run_and_persist(
     db = SessionLocal()
     try:
         job = _jobs.get(job_id, {})
-        if job.get("status") == "complete":
-            complete_run(db, job_id, job.get("test_cases", []), job.get("rag_enabled", False))
-            logger.info("Job %s persisted (%d test cases).", job_id, len(job.get("test_cases", [])))
-        else:
-            fail_run(db, job_id, job.get("error") or "Generation failed")
-            logger.warning("Job %s persisted as failed.", job_id)
+        outcome = job.get("outcome", "failed")
+        finalize_run(
+            db,
+            job_id,
+            job.get("test_cases", []),
+            job.get("rag_enabled", False),
+            outcome=outcome,
+            reason=job.get("reason"),
+            error_count=job.get("error_count", 0),
+            failed_requirement_count=job.get("failed_requirement_count", 0),
+            generation_duration=job.get("generation_duration"),
+            fallback_used=job.get("fallback_used", False),
+        )
+        logger.info(
+            "Job %s persisted (outcome=%s, %d test cases).",
+            job_id, outcome, len(job.get("test_cases", [])),
+        )
     except Exception as exc:
         logger.error("DB persistence failed for job %s: %s", job_id, exc)
         try:
@@ -289,20 +302,24 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
     project_id = request.project_id or DEFAULT_PROJECT_ID
     job_id = str(uuid.uuid4())
 
-    # Resolve provider from DB settings (BYOK), fall back to env vars
-    from providers import get_provider_from_db, get_provider
+    # ── Strict BYOK resolution ────────────────────────────────────
+    # Resolve the active provider from saved settings only. If no key/endpoint
+    # is configured, fail fast and clearly — never fall back to env/developer
+    # keys, and never create a phantom run that would later read as a failure.
     db = SessionLocal()
     try:
         try:
-            provider_instance = get_provider_from_db(db)
-        except Exception:
-            provider_instance = get_provider()
+            provider_instance = provider_manager.get_active_provider(db)
+        except ProviderError as exc:
+            logger.warning("Generation rejected — %s", exc)
+            return {
+                "error": exc.message,
+                "error_type": exc.error_type.value,
+                "provider": exc.provider,
+            }
 
-        provider_name = provider_instance.model_name  # reuse after assignment
+        provider_label = provider_instance.provider_id
         model_name = provider_instance.model_name
-
-        # Extract the actual provider label (class name prefix) for the Run record
-        provider_label = type(provider_instance).__name__.replace("Provider", "").lower()
 
         create_run(
             db,
@@ -386,6 +403,11 @@ async def stream_job(job_id: str):
                 "total": job["total"],
                 "test_cases": job["test_cases"],
                 "rag_enabled": job.get("rag_enabled", False),
+                # Run outcome + reason so the client can surface partial-success
+                # ("warning") and clear failure reasons instead of a generic error.
+                "outcome": job.get("outcome"),
+                "reason": job.get("reason"),
+                "message": job.get("error") or job.get("reason"),
             }
             yield f"data: {json.dumps(payload)}\n\n"
 
@@ -599,30 +621,50 @@ def clear_cache():
 
 @app.get("/providers/active")
 def get_active_provider():
-    """Returns the currently active provider/model configuration."""
+    """Returns the currently active provider/model configuration (strict BYOK).
+
+    ``has_key`` reflects the saved credential only — there is no env-var fallback,
+    so this honestly reports whether generation can proceed.
+    """
     db = SessionLocal()
     try:
-        active_prov = db.query(db_models.AppConfig).filter(db_models.AppConfig.key == "active_provider").first()
-        active_model = db.query(db_models.AppConfig).filter(db_models.AppConfig.key == "active_model").first()
-
-        provider_name = (active_prov.value if active_prov else None) or os.getenv("PROVIDER", "anthropic")
-        model = (active_model.value if active_model else None) or "claude-sonnet-4-6"
-
+        provider_name, model = provider_manager.get_active_config(db)
         pk = db.query(db_models.ProviderKey).filter(db_models.ProviderKey.provider == provider_name).first()
 
-        # Provider-specific env var fallbacks (optional defaults, not required)
-        _provider_env_keys = {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "gemini": "GOOGLE_API_KEY",
-            "groq": "GROQ_API_KEY",
-        }
-        env_var = _provider_env_keys.get(provider_name, "")
-        has_key = bool(pk and pk.api_key) or bool(env_var and os.getenv(env_var))
+        if provider_name in provider_manager.ENDPOINT_PROVIDERS:
+            has_key = bool(pk and pk.endpoint)
+        else:
+            has_key = bool(pk and pk.api_key)
 
         return {"provider": provider_name, "model": model, "has_key": has_key}
     finally:
         db.close()
+
+
+@app.get("/providers/health")
+def providers_health():
+    """Live health/quota status for every registered provider (dashboard)."""
+    db = SessionLocal()
+    try:
+        return {"providers": provider_manager.health_check_all(db)}
+    finally:
+        db.close()
+
+
+@app.get("/providers/health/{provider}")
+def provider_health(provider: str):
+    """Live health status for a single provider."""
+    db = SessionLocal()
+    try:
+        return provider_manager.health_check(db, provider)
+    finally:
+        db.close()
+
+
+@app.get("/providers/metrics")
+def providers_metrics():
+    """In-process usage metrics (requests/failures/tokens/latency) per provider."""
+    return {"metrics": provider_manager.get_metrics()}
 
 
 @app.get("/providers/keys")

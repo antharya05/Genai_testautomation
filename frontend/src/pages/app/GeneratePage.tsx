@@ -427,7 +427,14 @@ export default function GeneratePage() {
       // requirement ids / ASIL / thresholds instead of re-deriving from strings.
       // The backend correlates each record by its flattened "id: statement" text,
       // so sending the full set is safe even when only a subset is selected.
-      const { job_id } = await startGeneration(requirements, projectId, uploadData?.parsed);
+      const start = await startGeneration(requirements, projectId, uploadData?.parsed);
+      // Strict BYOK: no provider key configured → backend returns a clear error.
+      if (!start.job_id) {
+        pushToast("error", start.error ?? "No AI provider configured. Add a key in Settings.");
+        setPhase("review");
+        return;
+      }
+      const job_id = start.job_id;
       setLastJobId(job_id);
       const es = openJobStream(job_id);
       esRef.current = es;

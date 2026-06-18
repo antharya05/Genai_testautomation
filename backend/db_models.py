@@ -36,7 +36,12 @@ class Run(Base):
     prompt_version = Column(String(20), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
-    error = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)  # also holds the human-readable reason for warning/failed
+    # Provider observability (Strict BYOK productionisation)
+    failed_requirement_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    generation_duration = Column(Float, nullable=True)  # seconds
+    fallback_used = Column(Boolean, default=False)
     # Coverage intelligence — stored for future dashboards, not yet surfaced in UI
     functional_count = Column(Integer, default=0)
     boundary_count = Column(Integer, default=0)
