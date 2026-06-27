@@ -67,25 +67,39 @@ class ProviderManager:
 
     # ── Configuration ────────────────────────────────────────────────────────
 
-    def get_active_config(self, db) -> tuple[str, str]:
-        """Return ``(provider_id, model)`` from AppConfig, with sane defaults."""
+    def get_active_config(self, db, org_id: str | None = None) -> tuple[str, str]:
+        """Return ``(provider_id, model)`` from AppConfig (org-scoped when given).
+
+        Each org selects its own active provider/model via namespaced AppConfig
+        keys (``active_provider:<org_id>``), falling back to the legacy global key
+        then the ``PROVIDER`` env default.
+        """
         from db_models import AppConfig
 
-        active_prov = db.query(AppConfig).filter(AppConfig.key == "active_provider").first()
-        active_model = db.query(AppConfig).filter(AppConfig.key == "active_model").first()
+        def _cfg(base: str) -> str | None:
+            if org_id:
+                row = db.query(AppConfig).filter(AppConfig.key == f"{base}:{org_id}").first()
+                if row and row.value:
+                    return row.value
+            row = db.query(AppConfig).filter(AppConfig.key == base).first()
+            return row.value if row else None
 
-        provider = ((active_prov.value if active_prov else None) or os.getenv("PROVIDER", "anthropic")).lower()
-        model = (active_model.value if active_model else None) or _DEFAULT_MODELS.get(provider, "")
+        provider = (_cfg("active_provider") or os.getenv("PROVIDER", "anthropic")).lower()
+        model = _cfg("active_model") or _DEFAULT_MODELS.get(provider, "")
         return provider, model
 
-    def _credential(self, db, provider: str) -> tuple[str | None, str | None]:
-        """Return ``(api_key, endpoint)`` for ``provider`` from the DB only."""
+    def _credential(self, db, provider: str, org_id: str | None = None) -> tuple[str | None, str | None]:
+        """Return ``(api_key, endpoint)`` for ``provider`` scoped to an org."""
         from db_models import ProviderKey
 
-        pk = db.query(ProviderKey).filter(ProviderKey.provider == provider).first()
+        from services.secrets import decrypt_secret
+
+        q = db.query(ProviderKey).filter(ProviderKey.provider == provider)
+        q = q.filter(ProviderKey.organization_id == org_id) if org_id else q.filter(ProviderKey.organization_id.is_(None))
+        pk = q.first()
         if not pk:
             return None, None
-        return pk.api_key, pk.endpoint
+        return decrypt_secret(pk.api_key), pk.endpoint
 
     # ── Construction ─────────────────────────────────────────────────────────
 
@@ -101,14 +115,14 @@ class ProviderManager:
             return cls(endpoint=endpoint, model=model)  # type: ignore[call-arg]
         return cls(api_key=api_key, model=model)  # type: ignore[call-arg]
 
-    def get_active_provider(self, db) -> LLMProvider:
-        """Resolve the active provider under **strict BYOK** rules.
+    def get_active_provider(self, db, org_id: str | None = None) -> LLMProvider:
+        """Resolve the active provider under **strict BYOK** rules (org-scoped).
 
         Raises ``ProviderError(MISSING_KEY)`` when the selected provider has no
         configured credential. Never falls back to env keys or another provider.
         """
-        provider, model = self.get_active_config(db)
-        api_key, endpoint = self._credential(db, provider)
+        provider, model = self.get_active_config(db, org_id)
+        api_key, endpoint = self._credential(db, provider, org_id)
 
         if provider in self.ENDPOINT_PROVIDERS:
             if not endpoint:
@@ -126,28 +140,52 @@ class ProviderManager:
 
         return self._build(provider, api_key=api_key, model=model, endpoint=endpoint)
 
-    def try_get_active_provider(self, db) -> LLMProvider | None:
+    def resolve_for(self, db, provider: str, model: str | None, org_id: str | None = None) -> LLMProvider:
+        """Resolve a *specific* provider/model under strict BYOK rules (org-scoped).
+
+        Used by the durable-job worker: a run records the provider/model it was
+        created with, and the worker must rebuild exactly that — from the run's
+        own organization's keys. No env/developer fallback.
+        """
+        provider = (provider or "").lower()
+        api_key, endpoint = self._credential(db, provider, org_id)
+        if provider in self.ENDPOINT_PROVIDERS:
+            if not endpoint:
+                raise ProviderError(
+                    f"No endpoint configured for {provider}.",
+                    ProviderErrorType.MISSING_KEY,
+                    provider=provider,
+                )
+        elif not api_key:
+            raise ProviderError(
+                f"No API key configured for {provider}.",
+                ProviderErrorType.MISSING_KEY,
+                provider=provider,
+            )
+        return self._build(provider, api_key=api_key, model=model, endpoint=endpoint)
+
+    def try_get_active_provider(self, db, org_id: str | None = None) -> LLMProvider | None:
         """Non-raising variant for optional paths (e.g. the parser LLM fallback).
 
         Returns ``None`` when no provider is configured, so callers can degrade
         gracefully instead of failing.
         """
         try:
-            return self.get_active_provider(db)
+            return self.get_active_provider(db, org_id)
         except ProviderError as exc:
             logger.info("No active provider available: %s", exc)
             return None
 
     # ── Health ───────────────────────────────────────────────────────────────
 
-    def health_check(self, db, provider: str) -> dict:
-        """Probe a single provider and return a dashboard status row."""
+    def health_check(self, db, provider: str, org_id: str | None = None) -> dict:
+        """Probe a single provider and return a dashboard status row (org-scoped)."""
         provider = provider.lower()
-        active_provider, active_model = self.get_active_config(db)
+        active_provider, active_model = self.get_active_config(db, org_id)
         # Only pin the configured model for the active provider; others probe
         # against their default model.
         probe_model = active_model if provider == active_provider else None
-        api_key, endpoint = self._credential(db, provider)
+        api_key, endpoint = self._credential(db, provider, org_id)
         configured = bool(endpoint) if provider in self.ENDPOINT_PROVIDERS else bool(api_key)
 
         row = {
@@ -184,10 +222,10 @@ class ProviderManager:
                 row["quota_state"] = "rate_limited"
         return row
 
-    def health_check_all(self, db) -> list[dict]:
+    def health_check_all(self, db, org_id: str | None = None) -> list[dict]:
         """Probe every registered provider (configured ones make a live call)."""
-        active_provider, _ = self.get_active_config(db)
-        rows = [self.health_check(db, name) for name in self.REGISTRY]
+        active_provider, _ = self.get_active_config(db, org_id)
+        rows = [self.health_check(db, name, org_id) for name in self.REGISTRY]
         for row in rows:
             row["active"] = row["provider"] == active_provider
         return rows

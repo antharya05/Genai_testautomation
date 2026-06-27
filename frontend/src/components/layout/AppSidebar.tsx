@@ -4,7 +4,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  FileText,
   GitBranch,
+  Layers,
   LayoutDashboard,
   ListChecks,
   Loader2,
@@ -236,12 +238,14 @@ export function AppSidebar({ collapsed, onCollapse, isMobile, mobileOpen, onClos
           </div>
         )}
         <NavItem to="/app/dashboard"    icon={LayoutDashboard} label="Dashboard"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/requirements" icon={FileText}        label="Requirements"   collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
         <NavItem to="/app/generate"     icon={Sparkles}        label="Generate Tests" collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
         <NavItem to="/app/review"       icon={ClipboardCheck}  label="Review"         collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
         <NavItem to="/app/test-cases"   icon={ListChecks}      label="Test Cases"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
         <NavItem to="/app/validation"   icon={CheckCircle2}    label="Validation"     collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
         <NavItem to="/app/traceability" icon={GitBranch}       label="Traceability"   collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
         <NavItem to="/app/runs"         icon={PlayCircle}      label="Runs"           collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
+        <NavItem to="/app/baselines"    icon={Layers}          label="Baselines"      collapsed={effectiveCollapsed} onNavigate={isMobile ? onCloseMobile : undefined} />
       </div>
 
       {/* ── Divider ───────────────────────────────────────────── */}

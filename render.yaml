@@ -9,22 +9,62 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    # Release-phase schema migration: Alembic is the single source of truth, so
+    # the schema is brought to head before the server starts. ``upgrade head`` is
+    # idempotent — a no-op when already current.
+    startCommand: alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: RAG_ENABLED
         value: "false"
       - key: PROVIDER
         value: anthropic
-      - key: ANTHROPIC_API_KEY
+      # Production mode: the app FAILS TO BOOT if any security-critical secret is
+      # missing/insecure or DATABASE_URL is SQLite (see config.validate_config).
+      - key: APP_ENV
+        value: production
+      # ── Security (P0) — set all three in the Render dashboard ──────────────
+      # Shared login password for the single-tenant gate.
+      - key: APP_PASSWORD
         sync: false
-      - key: ANTHROPIC_MODEL
-        value: claude-sonnet-4-6
-      - key: GROQ_API_KEY
+      # Signs bearer tokens. Use a long random value; rotating it logs everyone out.
+      - key: AUTH_SECRET
+        generateValue: true
+      # Encrypts BYOK provider keys at rest. Rotating it invalidates stored keys.
+      - key: KEY_ENCRYPTION_SECRET
+        generateValue: true
+      # Comma-separated list of allowed frontend origins (CORS).
+      - key: ALLOWED_ORIGINS
         sync: false
-      - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
-      # Provision a Render PostgreSQL instance and paste its Internal URL here,
-      # or leave unset to fall back to ephemeral SQLite (lost on redeploy).
+      # ── Persistence (P0) ──────────────────────────────────────────────────
+      # REQUIRED for production: provision a Render PostgreSQL instance and paste
+      # its Internal URL here. If unset, the app falls back to ephemeral SQLite
+      # which is LOST on every redeploy — do not run production without this.
+      # NOTE: the worker (below) MUST share this exact DATABASE_URL — the DB is
+      # the job queue. SQLite cannot be shared across processes, so durable jobs
+      # require PostgreSQL in any multi-process / production deployment.
+      - key: DATABASE_URL
+        sync: false
+
+  # Durable-job worker (Phase 2B): claims and runs generation jobs out of the
+  # shared PostgreSQL queue. Generation no longer runs in the web process.
+  - type: worker
+    name: testgen-worker
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m worker
+    envVars:
+      - key: RAG_ENABLED
+        value: "false"
+      - key: PROVIDER
+        value: anthropic
+      # MUST equal the web service's KEY_ENCRYPTION_SECRET — the worker decrypts
+      # the same BYOK provider keys. Set both from one shared value (e.g. a Render
+      # env group); a generated/mismatched value here makes keys undecryptable.
+      - key: KEY_ENCRYPTION_SECRET
+        sync: false
+      # Must point at the SAME PostgreSQL instance as the web service.
       - key: DATABASE_URL
         sync: false

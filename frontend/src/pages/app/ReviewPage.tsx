@@ -18,10 +18,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { downloadBlob, exportCsv, getProjectRuns, getRunTestCases, patchTestCaseReview } from "../../api/client";
+import { approveRun, downloadBlob, exportCsv, getProjectRuns, getRunGovernance, getRunReviewEvents, getRunTestCases, patchTestCaseReview, rejectRun, reopenRun } from "../../api/client";
 import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
-import type { Run, TestCase } from "../../types";
+import type { ReviewEvent, Run, RunGovernance, TestCase } from "../../types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ function ActionBtn({ label, active, activeColor, onClick }: {
 
 // ─── Review card ──────────────────────────────────────────────────────────────
 
-function ReviewCard({ tc, review, selected, onToggleSelect, onSetStatus, onEditTitle, onSetNote, index }: {
+function ReviewCard({ tc, review, selected, onToggleSelect, onSetStatus, onEditTitle, onSetNote, events, index }: {
   tc: TestCase;
   review: ReviewState;
   selected: boolean;
@@ -98,6 +98,7 @@ function ReviewCard({ tc, review, selected, onToggleSelect, onSetStatus, onEditT
   onSetStatus: (s: ReviewStatus) => void;
   onEditTitle: (t: string) => void;
   onSetNote: (n: string) => void;
+  events: ReviewEvent[];
   index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -311,6 +312,29 @@ function ReviewCard({ tc, review, selected, onToggleSelect, onSetStatus, onEditT
                   </div>
                 )}
               </div>
+
+              {/* Audit history — immutable review event trail */}
+              {events.length > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--c-border)" }}>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--c-text-3)", marginBottom: 6, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                    Review History ({events.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {events.map(ev => (
+                      <div key={ev.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.72rem" }}>
+                        <span style={{ color: "var(--c-text-3)", fontFamily: "var(--font-mono)", flexShrink: 0 }}>
+                          {new Date(ev.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                        <span style={{ color: STATUS_CONFIG[(ev.to_status as ReviewStatus) ?? "pending"]?.color ?? "var(--c-text-2)", fontWeight: 600 }}>
+                          {ev.from_status} → {ev.to_status}
+                        </span>
+                        <span style={{ color: "var(--c-text-3)" }}>by {ev.actor ?? "—"}</span>
+                        {ev.note && <span style={{ color: "var(--c-text-3)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>“{ev.note}”</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -335,8 +359,44 @@ export default function ReviewPage() {
   const [filterStatus, setFilterStatus] = useState<ReviewStatus | "all">("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [eventsByTc, setEventsByTc] = useState<Record<string, ReviewEvent[]>>({});
+  const [gov, setGov] = useState<RunGovernance | null>(null);
+  const [govBusy, setGovBusy] = useState(false);
+  const [govError, setGovError] = useState<string | null>(null);
   // Debounce note saves: { [test_id]: timeoutId }
   const noteTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  async function loadEvents(runId: string) {
+    try {
+      const evs = await getRunReviewEvents(runId);
+      const grouped: Record<string, ReviewEvent[]> = {};
+      evs.forEach(e => { (grouped[e.test_id] ??= []).push(e); });
+      setEventsByTc(grouped);
+    } catch { /* ignore */ }
+  }
+
+  async function loadGov(runId: string) {
+    try { setGov(await getRunGovernance(runId)); } catch { setGov(null); }
+  }
+
+  const locked = !!gov?.locked;
+
+  async function doGov(action: "approve" | "reject" | "reopen") {
+    if (!selectedRunId) return;
+    setGovBusy(true); setGovError(null);
+    try {
+      const fn = action === "approve" ? approveRun : action === "reject" ? rejectRun : reopenRun;
+      const res = await fn(selectedRunId);
+      if (res && (res as { error?: string }).error) setGovError((res as { error?: string }).error!);
+      else setGov(res);
+      await loadEvents(selectedRunId);
+    } catch (e) {
+      const err = e as { response?: { data?: { detail?: string; error?: string } } };
+      setGovError(err?.response?.data?.detail || err?.response?.data?.error || "Action failed");
+    } finally {
+      setGovBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -373,28 +433,37 @@ export default function ReviewPage() {
       })
       .catch(() => {})
       .finally(() => setLoadingCases(false));
+    loadEvents(selectedRunId);
+    loadGov(selectedRunId);
   }, [selectedRunId]);
 
   // ─── Mutations ─────────────────────────────────────────────────────────────
 
+  function refreshReviewMeta() {
+    if (selectedRunId) { loadEvents(selectedRunId); loadGov(selectedRunId); }
+  }
+
   function setStatus(id: string, status: ReviewStatus) {
+    if (!selectedRunId || locked) return;
     setReviewMap(prev => ({ ...prev, [id]: { ...(prev[id] ?? { status: "pending", note: "", editedTitle: "" }), status } }));
-    patchTestCaseReview(id, status).catch(() => {});
+    patchTestCaseReview(selectedRunId, id, status).then(refreshReviewMeta).catch(() => {});
   }
   function setTitle(id: string, title: string) {
     setReviewMap(prev => ({ ...prev, [id]: { ...(prev[id] ?? { status: "pending", note: "", editedTitle: title }), editedTitle: title } }));
   }
   function setNote(id: string, note: string) {
+    if (!selectedRunId) return;
     setReviewMap(prev => ({ ...prev, [id]: { ...(prev[id] ?? { status: "pending", note: "", editedTitle: "" }), note } }));
     clearTimeout(noteTimers.current[id]);
     noteTimers.current[id] = setTimeout(() => {
-      patchTestCaseReview(id, undefined, note).catch(() => {});
+      patchTestCaseReview(selectedRunId, id, undefined, note).then(() => loadEvents(selectedRunId)).catch(() => {});
     }, 800);
   }
   function resetAll() {
-    testCases.forEach(tc => {
-      patchTestCaseReview(tc.test_id, "pending", "").catch(() => {});
-    });
+    if (!selectedRunId) return;
+    Promise.all(testCases.map(tc =>
+      patchTestCaseReview(selectedRunId, tc.test_id, "pending", "").catch(() => {})
+    )).then(() => loadEvents(selectedRunId));
     setReviewMap(prev => {
       const next = { ...prev };
       testCases.forEach(tc => { next[tc.test_id] = { status: "pending", note: "", editedTitle: tc.title }; });
@@ -418,7 +487,10 @@ export default function ReviewPage() {
   // ─── Bulk actions ───────────────────────────────────────────────────────────
 
   function bulkSetStatus(ids: Set<string>, status: ReviewStatus) {
-    ids.forEach(id => { patchTestCaseReview(id, status).catch(() => {}); });
+    if (!selectedRunId || locked) return;
+    Promise.all([...ids].map(id =>
+      patchTestCaseReview(selectedRunId, id, status).catch(() => {})
+    )).then(refreshReviewMeta);
     setReviewMap(prev => {
       const next = { ...prev };
       ids.forEach(id => { next[id] = { ...(next[id] ?? { status: "pending", note: "", editedTitle: "" }), status }; });
@@ -593,6 +665,86 @@ export default function ReviewPage() {
               )}
             </div>
 
+            {/* Governance sign-off bar */}
+            {gov && (() => {
+              const stateCfg: Record<string, { label: string; color: string }> = {
+                draft:    { label: "Draft",    color: "#94a3b8" },
+                reviewed: { label: "Reviewed", color: "#60a5fa" },
+                approved: { label: "Approved", color: "#10b981" },
+                rejected: { label: "Rejected", color: "#f87171" },
+              };
+              const sc = stateCfg[gov.review_state] ?? stateCfg.draft;
+              const allApproved = testCases.length > 0 && counts.approved === testCases.length;
+              const canApprove = reviewComplete && allApproved && !locked;
+              const canReject = reviewComplete && !locked;
+              return (
+                <div style={{
+                  background: "var(--c-surface)", border: `1px solid ${sc.color}40`,
+                  borderRadius: 10, padding: "10px 16px", marginBottom: 14,
+                  display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                }}>
+                  <span style={{
+                    fontSize: "0.7rem", fontWeight: 700, padding: "2px 10px", borderRadius: 5,
+                    background: sc.color + "18", border: `1px solid ${sc.color}40`, color: sc.color,
+                    letterSpacing: "0.04em", textTransform: "uppercase",
+                  }}>
+                    {sc.label}
+                  </span>
+                  {locked && gov.approved_by_display && (
+                    <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)" }}>
+                      by {gov.approved_by_display}
+                      {gov.approved_at ? ` · ${formatDate(gov.approved_at)}` : ""}
+                    </span>
+                  )}
+                  {gov.stale && (
+                    <span style={{ fontSize: "0.72rem", color: "#f59e0b", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      <AlertTriangle size={12} /> Content changed since sign-off
+                    </span>
+                  )}
+                  {govError && <span style={{ fontSize: "0.72rem", color: "#f87171" }}>{govError}</span>}
+
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                    {!locked && (
+                      <>
+                        <button onClick={() => doGov("approve")} disabled={!canApprove || govBusy}
+                          title={canApprove ? "Approve & lock this run" : "All cases must be approved first"}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7,
+                            cursor: canApprove && !govBusy ? "pointer" : "not-allowed", fontSize: "0.78rem", fontWeight: 600,
+                            background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
+                            color: "#10b981", opacity: canApprove && !govBusy ? 1 : 0.45, fontFamily: "var(--font)",
+                          }}>
+                          <CheckCircle2 size={13} /> Approve Run
+                        </button>
+                        <button onClick={() => doGov("reject")} disabled={!canReject || govBusy}
+                          title={canReject ? "Reject & lock this run" : "Finish reviewing all cases first"}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7,
+                            cursor: canReject && !govBusy ? "pointer" : "not-allowed", fontSize: "0.78rem", fontWeight: 600,
+                            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.28)",
+                            color: "#f87171", opacity: canReject && !govBusy ? 1 : 0.45, fontFamily: "var(--font)",
+                          }}>
+                          <X size={13} /> Reject Run
+                        </button>
+                      </>
+                    )}
+                    {locked && (
+                      <button onClick={() => doGov("reopen")} disabled={govBusy}
+                        title="Re-open for changes (unlocks the run)"
+                        style={{
+                          display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7,
+                          cursor: govBusy ? "not-allowed" : "pointer", fontSize: "0.78rem", fontWeight: 600,
+                          background: "var(--c-bg-2)", border: "1px solid var(--c-border)",
+                          color: "var(--c-text-2)", fontFamily: "var(--font)",
+                        }}>
+                        <RotateCcw size={13} /> Re-open
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Summary cards (clickable filters) */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
               {[
@@ -751,6 +903,7 @@ export default function ReviewPage() {
                     onSetStatus={s => setStatus(tc.test_id, s)}
                     onEditTitle={t => setTitle(tc.test_id, t)}
                     onSetNote={n => setNote(tc.test_id, n)}
+                    events={eventsByTc[tc.test_id] ?? []}
                     index={i}
                   />
                 ))}

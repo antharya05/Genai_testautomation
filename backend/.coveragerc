@@ -1,0 +1,20 @@
+[run]
+source = .
+omit =
+    venv/*
+    tests/*
+    migrations/*
+    */__pycache__/*
+    seed_demo.py
+    llm.py
+    embeddings/*
+    vectorstore/*
+    retrievers/*
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError

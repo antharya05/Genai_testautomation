@@ -1,19 +1,22 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pymupdf
-pdfplumber
-python-docx
-python-dotenv
-anthropic
-groq
-google-generativeai
-pydantic
-openpyxl
+fastapi==0.136.3
+uvicorn[standard]==0.49.0
+python-multipart==0.0.32
+pymupdf==1.27.2.3
+pdfplumber==0.11.10
+python-docx==1.2.0
+python-dotenv==1.2.2
+anthropic==0.109.1
+groq==1.4.0
+google-generativeai==0.8.6
+pydantic==2.13.4
+openpyxl==3.1.5
+httpx==0.28.1
+# Secrets-at-rest encryption (provider API keys) + auth tokens
+cryptography==48.0.1
 # Database
-sqlalchemy
-alembic
-psycopg2-binary
+sqlalchemy==2.0.50
+alembic==1.18.4
+psycopg2-binary==2.9.12
 # RAG dependencies (chromadb + sentence-transformers/torch) live in
 # requirements-rag.txt — they are heavy and only needed when RAG_ENABLED=true.
 # Install both for full local dev:  pip install -r requirements.txt -r requirements-rag.txt

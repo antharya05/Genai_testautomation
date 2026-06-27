@@ -47,6 +47,23 @@ FATAL = frozenset({
     ProviderErrorType.QUOTA_EXHAUSTED,
 })
 
+# Mapping from the canonical provider error type to the persisted, requirement-level
+# ``failure_type`` vocabulary surfaced in the Requirements Workspace. Parse- and
+# validation-failures are generator concerns (not provider errors) and are tagged
+# by the generator directly; everything that originates in the provider maps here.
+PERSISTED_FAILURE_TYPE: dict[ProviderErrorType, str] = {
+    ProviderErrorType.RATE_LIMIT: "rate_limit",
+    ProviderErrorType.TIMEOUT: "timeout",
+    ProviderErrorType.UNAVAILABLE: "provider_unavailable",
+    ProviderErrorType.BAD_RESPONSE: "malformed_response",
+    ProviderErrorType.QUOTA_EXHAUSTED: "rate_limit",
+    ProviderErrorType.MISSING_KEY: "unknown",
+    ProviderErrorType.AUTH: "unknown",
+    ProviderErrorType.INVALID_KEY: "unknown",
+    ProviderErrorType.UNKNOWN: "unknown",
+}
+
+
 # Human-readable status labels for the health dashboard.
 HEALTH_LABEL = {
     ProviderErrorType.MISSING_KEY: "Not Configured",
@@ -70,12 +87,16 @@ class ProviderError(Exception):
         error_type: ProviderErrorType = ProviderErrorType.UNKNOWN,
         provider: str | None = None,
         status_code: int | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.error_type = error_type
         self.provider = provider
         self.status_code = status_code
+        # Seconds the provider asked us to wait before retrying (from a Retry-After
+        # header / SDK attribute). ``None`` when the provider gave no guidance.
+        self.retry_after = retry_after
 
     @property
     def retryable(self) -> bool:
@@ -89,14 +110,21 @@ class ProviderError(Exception):
     def health_label(self) -> str:
         return HEALTH_LABEL.get(self.error_type, "Error")
 
+    @property
+    def failure_type(self) -> str:
+        """The persisted, requirement-level failure category for this error."""
+        return PERSISTED_FAILURE_TYPE.get(self.error_type, "unknown")
+
     def to_dict(self) -> dict:
         return {
             "message": self.message,
             "error_type": self.error_type.value,
+            "failure_type": self.failure_type,
             "provider": self.provider,
             "status_code": self.status_code,
             "retryable": self.retryable,
             "fatal": self.fatal,
+            "retry_after": self.retry_after,
         }
 
     def __str__(self) -> str:  # pragma: no cover - cosmetic
@@ -116,6 +144,32 @@ def _status_code(exc: Exception) -> int | None:
     return code if isinstance(code, int) else None
 
 
+def _retry_after(exc: Exception) -> float | None:
+    """Best-effort extraction of a Retry-After hint (seconds) from any SDK exception.
+
+    Looks at a direct ``retry_after`` attribute first, then the ``Retry-After``
+    header on an attached response. The header may be an integer number of seconds
+    (the only form the major LLM SDKs emit); HTTP-date form is ignored.
+    """
+    for attr in ("retry_after", "retry_after_seconds"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, (int, float)) and val >= 0:
+            return float(val)
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if headers is not None:
+        try:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+        except Exception:  # noqa: BLE001 - non-mapping headers
+            raw = None
+        if raw is not None:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def classify_exception(exc: Exception, provider: str | None = None) -> ProviderError:
     """Map any SDK/transport exception onto a canonical :class:`ProviderError`.
 
@@ -131,9 +185,13 @@ def classify_exception(exc: Exception, provider: str | None = None) -> ProviderE
     msg = str(exc) or ""
     low = msg.lower()
     status = _status_code(exc)
+    retry_after = _retry_after(exc)
 
     def err(t: ProviderErrorType, text: str | None = None) -> ProviderError:
-        return ProviderError(text or msg or t.value, t, provider=provider, status_code=status)
+        return ProviderError(
+            text or msg or t.value, t, provider=provider,
+            status_code=status, retry_after=retry_after,
+        )
 
     # ── Timeouts ──────────────────────────────────────────────────────────────
     if isinstance(exc, TimeoutError) or "timeout" in name or "timed out" in low:

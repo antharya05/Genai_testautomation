@@ -43,18 +43,25 @@ const FORMATS = [
 export function ExportModal({ testCases, onClose, onToast }: Props) {
   const [projectName, setProjectName] = useState("automotive_project");
   const [exporting, setExporting] = useState<"excel" | "csv" | null>(null);
+  const [approvedOnly, setApprovedOnly] = useState(false);
+
+  const approvedCount = testCases.filter(tc => tc.review_status === "approved").length;
+  const exportCases = approvedOnly
+    ? testCases.filter(tc => tc.review_status === "approved")
+    : testCases;
 
   async function doExport(format: "excel" | "csv") {
     setExporting(format);
     try {
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "_");
+      const suffix = approvedOnly ? "_approved" : "";
       if (format === "excel") {
-        const blob = await exportExcel(testCases, projectName);
-        downloadBlob(blob, `${projectName}_${timestamp}.xlsx`);
+        const blob = await exportExcel(exportCases, projectName);
+        downloadBlob(blob, `${projectName}${suffix}_${timestamp}.xlsx`);
         onToast("success", "Excel exported successfully");
       } else {
-        const blob = await exportCsv(testCases, projectName);
-        downloadBlob(blob, `${projectName}_${timestamp}_jira.csv`);
+        const blob = await exportCsv(exportCases, projectName);
+        downloadBlob(blob, `${projectName}${suffix}_${timestamp}_jira.csv`);
         onToast("success", "JIRA CSV exported successfully");
       }
       onClose();
@@ -105,7 +112,7 @@ export function ExportModal({ testCases, onClose, onToast }: Props) {
                 Export Test Cases
               </div>
               <div style={{ fontSize: "0.75rem", color: "var(--c-text-3)", marginTop: 2 }}>
-                {testCases.length} test cases ready for export
+                {exportCases.length} test case{exportCases.length === 1 ? "" : "s"} ready for export
               </div>
             </div>
             <motion.button
@@ -137,6 +144,25 @@ export function ExportModal({ testCases, onClose, onToast }: Props) {
                 Filename: {projectName}_YYYYMMDD.xlsx
               </div>
             </div>
+
+            {/* Approved-only filter */}
+            <label style={{
+              display: "flex", alignItems: "center", gap: 9, padding: "10px 12px", borderRadius: 8,
+              border: "1px solid var(--c-border)", background: "var(--c-bg-2)",
+              cursor: approvedCount > 0 ? "pointer" : "not-allowed", opacity: approvedCount > 0 ? 1 : 0.55,
+            }}>
+              <input
+                type="checkbox"
+                checked={approvedOnly}
+                disabled={approvedCount === 0}
+                onChange={e => setApprovedOnly(e.target.checked)}
+                style={{ accentColor: "#22C55E", width: 15, height: 15 }}
+              />
+              <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--c-text)" }}>Approved only</span>
+              <span style={{ fontSize: "0.6875rem", color: "var(--c-text-3)", marginLeft: "auto" }}>
+                {approvedCount} of {testCases.length} approved
+              </span>
+            </label>
 
             {/* Format options */}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

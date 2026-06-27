@@ -1,8 +1,8 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   AlertCircle,
+  ArrowRight,
   CheckCircle2,
-  ChevronDown,
   Clock,
   GitBranch,
   Loader2,
@@ -12,11 +12,11 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ElementType } from "react";
-import { Link } from "react-router-dom";
-import { getProjectRuns, getRunTestCases, getRunRequirements } from "../../api/client";
+import { Link, useNavigate } from "react-router-dom";
+import { getProjectRuns } from "../../api/client";
 import { useProject } from "../../context/ProjectContext";
 import { PageTransition } from "../../components/layout/PageTransition";
-import type { Run, TestCase } from "../../types";
+import type { Run } from "../../types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,223 +41,26 @@ function formatDuration(start: string, end?: string): string {
   }
 }
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; Icon: ElementType }> = {
   complete: { label: "Complete", color: "#10b981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.25)", Icon: CheckCircle2 },
-  running:  { label: "Running",  color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.25)",  Icon: Loader2 },
+  warning:  { label: "Warning",  color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.25)",  Icon: AlertCircle },
+  running:  { label: "Running",  color: "#60a5fa", bg: "rgba(96,165,250,0.1)",  border: "rgba(96,165,250,0.25)",  Icon: Loader2 },
+  failed:   { label: "Failed",   color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.25)", Icon: AlertCircle },
   error:    { label: "Failed",   color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.25)", Icon: AlertCircle },
 };
-
-// ─── RunDetail — expanded content for a single run ────────────────────────────
-
-interface RunDetailProps {
-  run: Run;
-}
-
-function RunDetail({ run }: RunDetailProps) {
-  const [testCases, setTestCases] = useState<TestCase[] | null>(null);
-  const [requirements, setRequirements] = useState<{ id: string; text: string; position: number }[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"cases" | "requirements">("cases");
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      try {
-        const [cases, reqs] = await Promise.all([
-          getRunTestCases(run.id),
-          getRunRequirements(run.id),
-        ]);
-        if (!cancelled) {
-          setTestCases(cases);
-          setRequirements(reqs);
-        }
-      } catch {
-        if (!cancelled) {
-          setTestCases([]);
-          setRequirements([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [run.id]);
-
-  const ASIL_COLORS: Record<string, string> = {
-    QM: "#94a3b8", A: "#10b981", B: "#f59e0b", C: "#f97316", D: "#ef4444",
-  };
-  const TYPE_COLORS: Record<string, string> = {
-    functional: "#818cf8", boundary: "#34d399", negative: "#f87171",
-    fault_injection: "#fb923c", timing: "#60a5fa", safety: "#a78bfa",
-    recovery: "#4ade80", stress: "#f472b6",
-  };
-
-  if (loading) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", padding: "32px 0" }}>
-        <Loader2 size={20} color="var(--c-accent)" style={{ animation: "spin 1s linear infinite" }} />
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: "0 0 4px" }}>
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid var(--c-border)", paddingBottom: 0 }}>
-        {(["cases", "requirements"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              padding: "8px 16px",
-              background: "transparent",
-              border: "none",
-              borderBottom: tab === t ? "2px solid var(--c-accent)" : "2px solid transparent",
-              color: tab === t ? "var(--c-accent)" : "var(--c-text-3)",
-              fontWeight: 600,
-              fontSize: "0.8125rem",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-              marginBottom: -1,
-            }}
-          >
-            {t === "cases"
-              ? `Test Cases (${testCases?.length ?? 0})`
-              : `Requirements (${requirements?.length ?? 0})`}
-          </button>
-        ))}
-      </div>
-
-      {/* Test Cases tab */}
-      {tab === "cases" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {!testCases || testCases.length === 0 ? (
-            <p style={{ color: "var(--c-text-3)", fontSize: "0.875rem", textAlign: "center", padding: "20px 0" }}>
-              No test cases found for this run.
-            </p>
-          ) : (
-            testCases.map((tc) => (
-              <div
-                key={tc.test_id}
-                style={{
-                  background: "var(--c-bg)",
-                  border: "1px solid var(--c-border)",
-                  borderRadius: 10,
-                  padding: "12px 16px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontSize: "0.75rem", fontFamily: "monospace", color: "var(--c-text-3)", flexShrink: 0, paddingTop: 2 }}>
-                    {tc.test_id}
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--c-text)", flex: 1, lineHeight: 1.4 }}>
-                    {tc.title}
-                  </span>
-                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                    <span style={{
-                      fontSize: "0.6875rem", fontWeight: 700, padding: "2px 7px", borderRadius: 5,
-                      background: (ASIL_COLORS[tc.asil] ?? "#94a3b8") + "20",
-                      color: ASIL_COLORS[tc.asil] ?? "#94a3b8",
-                      border: `1px solid ${(ASIL_COLORS[tc.asil] ?? "#94a3b8")}40`,
-                    }}>
-                      {tc.asil}
-                    </span>
-                    <span style={{
-                      fontSize: "0.6875rem", fontWeight: 600, padding: "2px 7px", borderRadius: 5,
-                      background: (TYPE_COLORS[tc.test_type] ?? "#818cf8") + "15",
-                      color: TYPE_COLORS[tc.test_type] ?? "#818cf8",
-                      border: `1px solid ${(TYPE_COLORS[tc.test_type] ?? "#818cf8")}30`,
-                    }}>
-                      {tc.test_type.replace("_", " ")}
-                    </span>
-                  </div>
-                </div>
-
-                {tc.steps.length > 0 && (
-                  <div style={{ fontSize: "0.8125rem", color: "var(--c-text-2)", lineHeight: 1.5 }}>
-                    <span style={{ color: "var(--c-text-3)", fontWeight: 600, fontSize: "0.75rem", letterSpacing: "0.03em" }}>
-                      STEPS&nbsp;
-                    </span>
-                    {tc.steps.slice(0, 2).map((s, i) => (
-                      <span key={i} style={{ display: "block", paddingLeft: 12 }}>
-                        {i + 1}. {s}
-                      </span>
-                    ))}
-                    {tc.steps.length > 2 && (
-                      <span style={{ color: "var(--c-text-3)", paddingLeft: 12, fontSize: "0.75rem" }}>
-                        +{tc.steps.length - 2} more steps
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Requirements tab */}
-      {tab === "requirements" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {!requirements || requirements.length === 0 ? (
-            <p style={{ color: "var(--c-text-3)", fontSize: "0.875rem", textAlign: "center", padding: "20px 0" }}>
-              No requirements found for this run.
-            </p>
-          ) : (
-            requirements.map((req) => (
-              <div
-                key={req.id}
-                style={{
-                  background: "var(--c-bg)",
-                  border: "1px solid var(--c-border)",
-                  borderRadius: 10,
-                  padding: "10px 14px",
-                  display: "flex",
-                  gap: 10,
-                  alignItems: "flex-start",
-                }}
-              >
-                <span style={{
-                  fontSize: "0.75rem", fontFamily: "monospace", color: "var(--c-text-3)",
-                  flexShrink: 0, paddingTop: 2, minWidth: 32,
-                }}>
-                  #{req.position + 1}
-                </span>
-                <span style={{ fontSize: "0.875rem", color: "var(--c-text-2)", lineHeight: 1.5 }}>
-                  {req.text}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── RunCard ──────────────────────────────────────────────────────────────────
 
 interface RunCardProps {
   run: Run;
   index: number;
-  expanded: boolean;
-  onToggle: () => void;
+  onOpen: () => void;
 }
 
-function RunCard({ run, index, expanded, onToggle }: RunCardProps) {
+function RunCard({ run, index, onOpen }: RunCardProps) {
   const cfg = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.error;
   const { Icon } = cfg;
-
-  const coverageTypes = [
-    { key: "functional_count",      label: "Func",    color: "#818cf8" },
-    { key: "boundary_count",        label: "Bound",   color: "#34d399" },
-    { key: "negative_count",        label: "Neg",     color: "#f87171" },
-    { key: "fault_injection_count", label: "Fault",   color: "#fb923c" },
-    { key: "timing_count",          label: "Timing",  color: "#60a5fa" },
-    { key: "safety_count",          label: "Safety",  color: "#a78bfa" },
-  ] as const;
+  const openable = run.status !== "running";
 
   return (
     <motion.div
@@ -271,15 +74,15 @@ function RunCard({ run, index, expanded, onToggle }: RunCardProps) {
         overflow: "hidden",
       }}
     >
-      {/* Header row — always visible */}
+      {/* Header row — click to open the run detail page */}
       <div
-        onClick={run.status === "complete" ? onToggle : undefined}
+        onClick={openable ? onOpen : undefined}
         style={{
           padding: "16px 20px",
           display: "flex",
           alignItems: "center",
           gap: 14,
-          cursor: run.status === "complete" ? "pointer" : "default",
+          cursor: openable ? "pointer" : "default",
           userSelect: "none",
         }}
       >
@@ -325,94 +128,31 @@ function RunCard({ run, index, expanded, onToggle }: RunCardProps) {
           </div>
         </div>
 
-        {/* Coverage pills */}
-        {run.status === "complete" && (
-          <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 }}>
-            {coverageTypes.map(({ key, label, color }) => {
-              const count = (run as unknown as Record<string, unknown>)[key] as number | undefined;
-            if (!count) return null;
-              return (
-                <span key={key} style={{
-                  fontSize: "0.6875rem", fontWeight: 600,
-                  padding: "2px 6px", borderRadius: 5,
-                  background: color + "15", color, border: `1px solid ${color}30`,
-                }}>
-                  {count} {label}
-                </span>
-              );
-            })}
+        {/* Coverage % */}
+        {(run.status === "complete" || run.status === "warning") && run.coverage_pct != null && (
+          <div style={{ flexShrink: 0, textAlign: "right" }}>
+            <span style={{
+              fontSize: "1.05rem", fontWeight: 800, letterSpacing: "-0.02em",
+              color: run.coverage_pct === 100 ? "#10b981" : run.coverage_pct >= 80 ? "#f59e0b" : "#f87171",
+            }}>
+              {run.coverage_pct}%
+            </span>
+            <div style={{ fontSize: "0.625rem", color: "var(--c-text-3)" }}>coverage</div>
           </div>
         )}
 
-        {/* Action links */}
-        {run.status === "complete" && (
-          <div
-            style={{ display: "flex", gap: 4, flexShrink: 0 }}
-            onClick={e => e.stopPropagation()}
-          >
-            <Link
-              to={`/app/test-cases?runId=${run.id}`}
-              style={{
-                fontSize: "0.6875rem", fontWeight: 600,
-                padding: "3px 9px", borderRadius: 5, textDecoration: "none",
-                background: "rgba(129,140,248,0.1)", color: "#818cf8",
-                border: "1px solid rgba(129,140,248,0.25)",
-                transition: "background 0.12s ease",
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(129,140,248,0.2)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(129,140,248,0.1)"; }}
-            >
-              Tests
-            </Link>
-            <Link
-              to={`/app/traceability?runId=${run.id}`}
-              style={{
-                fontSize: "0.6875rem", fontWeight: 600,
-                padding: "3px 9px", borderRadius: 5, textDecoration: "none",
-                background: "rgba(96,165,250,0.1)", color: "#60a5fa",
-                border: "1px solid rgba(96,165,250,0.25)",
-                transition: "background 0.12s ease",
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(96,165,250,0.2)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(96,165,250,0.1)"; }}
-            >
-              Trace
-            </Link>
-          </div>
-        )}
-
-        {/* Expand chevron */}
-        {run.status === "complete" && (
-          <div style={{ flexShrink: 0, color: "var(--c-text-3)", transition: "transform 0.2s ease", transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
-            <ChevronDown size={16} />
-          </div>
-        )}
-        {run.status === "running" && (
+        {/* Open / status indicator */}
+        {openable ? (
+          <span style={{
+            display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+            fontSize: "0.75rem", fontWeight: 600, color: "var(--c-accent)",
+          }}>
+            Open <ArrowRight size={14} />
+          </span>
+        ) : (
           <span style={{ fontSize: "0.75rem", color: "var(--c-text-3)", flexShrink: 0 }}>In progress…</span>
         )}
-        {run.status === "error" && (
-          <span style={{ fontSize: "0.75rem", color: "#f87171", flexShrink: 0, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {run.error ?? "Generation failed"}
-          </span>
-        )}
       </div>
-
-      {/* Expanded detail panel */}
-      <AnimatePresence initial={false}>
-        {expanded && run.status === "complete" && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            style={{ overflow: "hidden" }}
-          >
-            <div style={{ borderTop: "1px solid var(--c-border)", padding: "16px 20px" }}>
-              <RunDetail run={run} />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -430,10 +170,10 @@ function MetaStat({ icon: Icon, value }: { icon: ElementType; value: string }) {
 
 export default function RunsPage() {
   const { selectedProject } = useProject();
+  const navigate = useNavigate();
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
 
   useEffect(() => {
@@ -458,11 +198,7 @@ export default function RunsPage() {
 
   useEffect(() => { loadRuns(); }, [selectedProject]);
 
-  function toggleExpand(id: string) {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }
-
-  const completedRuns = runs.filter((r) => r.status === "complete");
+  const completedRuns = runs.filter((r) => r.status === "complete" || r.status === "warning");
   const totalCases = completedRuns.reduce((s, r) => s + r.test_case_count, 0);
   const totalReqs = completedRuns.reduce((s, r) => s + r.requirement_count, 0);
 
@@ -606,8 +342,7 @@ export default function RunsPage() {
                 key={run.id}
                 run={run}
                 index={i}
-                expanded={expandedId === run.id}
-                onToggle={() => toggleExpand(run.id)}
+                onOpen={() => navigate(`/app/runs/${run.id}`)}
               />
             ))}
           </div>

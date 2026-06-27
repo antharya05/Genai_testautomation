@@ -28,6 +28,12 @@ frontend/.vite/
 uvicorn.log
 vite.log
 
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
 # OS
 .DS_Store
 Thumbs.db

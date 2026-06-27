@@ -121,3 +121,24 @@ ASIL_MIN_TEST_TYPES: dict[str, set[str]] = {
 }
 
 ASIL_MIN_CASES: dict[str, int] = {"QM": 2, "A": 2, "B": 3, "C": 3, "D": 5}
+
+
+def coverage_status(asil: str, present_types: set[str], case_count: int) -> str:
+    """Classify a requirement's test coverage against its ASIL depth bar.
+
+    Reuses the same expectations the prompt and validator use, so coverage in
+    the Requirements Workspace stays consistent with how cases are generated:
+
+      * ``"uncovered"`` — no linked test cases at all.
+      * ``"partial"``   — has cases but misses the expected test types or the
+        minimum case count for its ASIL.
+      * ``"covered"``   — meets both the test-type depth and the case-count bar.
+    """
+    if case_count <= 0:
+        return "uncovered"
+    asil = (asil or "QM").upper()
+    expected_types = ASIL_MIN_TEST_TYPES.get(asil, {"functional"})
+    min_cases = ASIL_MIN_CASES.get(asil, 2)
+    if present_types.issuperset(expected_types) and case_count >= min_cases:
+        return "covered"
+    return "partial"

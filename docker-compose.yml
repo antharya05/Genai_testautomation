@@ -1,25 +1,100 @@
+# Full local stack: Postgres + migrations + API + durable-job worker + frontend.
+# One command:  docker compose up --build
+#
+# Notes:
+# - Postgres is required so the API and the worker share the durable job queue
+#   (SQLite can't be shared across processes).
+# - The `migrate` service applies Alembic migrations once, before API/worker start.
+# - The worker reuses the backend image with a different command (python -m worker).
+# - Generation uses strict BYOK: after logging in, add a provider key in Settings.
 
-version: "3.9"
+# Shared backend env (anchor reused by migrate / backend / worker).
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg2://testgen:testgen@postgres:5432/testgen
+  APP_ENV: development
+  APP_PASSWORD: localdev
+  AUTH_SECRET: local-dev-auth-secret-change-me-16+
+  KEY_ENCRYPTION_SECRET: local-dev-encryption-secret-16+
+  ALLOWED_ORIGINS: http://localhost:5173
+  RAG_ENABLED: "true"           # RAG stack is baked into the image (see backend/Dockerfile)
+  PROVIDER: groq
+  # ── OAuth (Phase 4.5) ──────────────────────────────────────────────────────
+  # URLs the OAuth flow uses (must match how the browser reaches each service).
+  APP_BASE_URL: http://localhost:8000
+  FRONTEND_URL: http://localhost:5173
+  # Provider credentials — supply via a repo-root .env (see .env.example). A
+  # provider's button only appears once BOTH its id and secret are non-empty.
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+  MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
 
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: testgen
+      POSTGRES_PASSWORD: testgen
+      POSTGRES_DB: testgen
+    ports:
+      - "5432:5432"             # optional — handy for inspecting the DB from the host
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testgen -d testgen"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    build:
+      context: ./backend
+    environment:
+      <<: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    env_file:
-      - ./backend/.env
+    environment:
+      <<: *backend-env
+      # The API doesn't run generation, so it doesn't need the RAG stack loaded —
+      # keep it off here to save ~1.5 GB RAM. The worker (below) runs RAG.
+      RAG_ENABLED: "false"
     volumes:
       - ./backend/uploads:/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+    environment:
+      <<: *backend-env          # RAG_ENABLED stays "true" here — generation runs here
+    command: ["python", "-m", "worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
     ports:
       - "5173:80"
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  pgdata:
